@@ -2034,7 +2034,8 @@ static bool acl_load(THD *thd, const Grant_tables& tables)
   end_read_record(&read_record_info);
   freeze_size(&acl_users);
 
-//Reverse User
+//Reverse User Table
+//sample change
   const User_table& reverse_user_table= tables.reverse_user_table();
   if (reverse_user_table.init_read_record(&read_record_info, thd))
     DBUG_RETURN(true);
