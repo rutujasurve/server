@@ -688,6 +688,7 @@ enum enum_acl_tables
   TABLES_MAX // <== always the last
 };
 // bits for open_grant_tables
+//Testing sample change
 static const int Table_user= 1 << USER_TABLE;
 static const int Table_db= 1 << DB_TABLE;
 static const int Table_tables_priv= 1 << TABLES_PRIV_TABLE;
