@@ -24,7 +24,7 @@
   data in tables is sorted according to how many not-wild-cards there is
   in the relevant fields. Empty strings comes last.
 */
-
+//Sample change 2
 #include "mariadb.h"                          /* NO_EMBEDDED_ACCESS_CHECKS */
 #include "sql_priv.h"
 #include "sql_acl.h"         // MYSQL_DB_FIELD_COUNT, ACL_ACCESS
@@ -118,6 +118,7 @@ class ACL_HOST :public ACL_ACCESS
 public:
   acl_host_and_ip host;
   char *db;
+  ulong initial_deny;
 };
 
 class ACL_USER_BASE :public ACL_ACCESS
@@ -146,6 +147,7 @@ public:
   LEX_CSTRING plugin;
   LEX_CSTRING auth_string;
   LEX_CSTRING default_rolename;
+  ulong initial_deny;
 
   ACL_USER *copy(MEM_ROOT *root)
   {
@@ -5089,6 +5091,7 @@ public:
   ulong rights;
   ulong init_rights;
   uint key_length;
+  ulong initial_deny;
   GRANT_COLUMN(String &c,  ulong y) :rights (y), init_rights(y)
   {
     column= (char*) memdup_root(&grant_memroot,c.ptr(), key_length=c.length());
@@ -5133,6 +5136,7 @@ public:
   ulong cols;
   ulong init_cols; /* privileges found in physical table */
   HASH hash_columns;
+  ulong initial_deny;
 
   GRANT_TABLE(const char *h, const char *d,const char *u,
               const char *t, ulong p, ulong c);
