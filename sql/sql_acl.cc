@@ -108,6 +108,7 @@ class ACL_ACCESS {
 public:
   ulong sort;
   ulong access;
+  ulong deny;
 };
 
 /* ACL_HOST is used if no host is specified */
@@ -116,6 +117,7 @@ class ACL_HOST :public ACL_ACCESS
 {
 public:
   acl_host_and_ip host;
+  ulong initial_deny;
   char *db;
 };
 
@@ -145,6 +147,7 @@ public:
   LEX_CSTRING plugin;
   LEX_CSTRING auth_string;
   LEX_CSTRING default_rolename;
+  ulong initial_deny;
 
   ACL_USER *copy(MEM_ROOT *root)
   {
@@ -223,6 +226,7 @@ public:
   acl_host_and_ip host;
   const char *user,*db;
   ulong initial_access; /* access bits present in the table */
+  ulong initial_deny;
 };
 
 #ifndef DBUG_OFF
@@ -4599,6 +4603,7 @@ public:
   ulong rights;
   ulong init_rights;
   uint key_length;
+  ulong initial_deny;
   GRANT_COLUMN(String &c,  ulong y) :rights (y), init_rights(y)
   {
     column= (char*) memdup_root(&grant_memroot,c.ptr(), key_length=c.length());
@@ -4643,6 +4648,7 @@ public:
   ulong cols;
   ulong init_cols; /* privileges found in physical table */
   HASH hash_columns;
+  ulong initial_deny;
 
   GRANT_TABLE(const char *h, const char *d,const char *u,
               const char *t, ulong p, ulong c);
