@@ -806,6 +806,26 @@ class Grant_table_base
     return access_bits;
   }
 
+  /*
+    Get deny bits from table from the deny field index.
+
+    IMPLEMENTATION
+    The record should be already read in table->record[0]. All deny privileges
+    are specified as a SET of privileges.
+
+    SYNOPSIS
+      get_deny()
+      deny_field_idx   The field index at which the deny specification
+                         exists.
+    RETURN VALUE
+      deny 
+  */
+  ulong get_deny(uint deny_field_idx) const
+  {
+    ulong deny = (ulong) tl.table->field[deny_field_idx]->val_int();
+    return deny;
+  }
+
   /* Compute how many privilege columns this table has. This method
      can only be called after the table has been opened.
 
