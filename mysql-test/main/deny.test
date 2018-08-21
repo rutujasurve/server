@@ -1,0 +1,21 @@
+--enable_warnings
+delete from mysql.user where user like 'foo\_%';
+delete from mysql.db where user like 'foo\_%';
+delete from mysql.tables_priv where user like 'foo\_%';
+delete from mysql.columns_priv where user like 'foo\_%';
+flush privileges;
+
+CREATE USER foo;
+GRANT ALL ON *.* to foo;
+CONNECT (foo, localhost, foo);
+SELECT user, host from mysql.user;
+CONNECTION DEFAULT;
+DENY SELECT  ON *.* to foo;
+CONNECTION foo;
+SELECT user,host from mysql.user;
+--error ER_SPECIFIC_ACCESS_DENIED_ERROR
+
+disconnect foo;
+connection default;
+delete from mysql.user where user like 'foo\_%';
+flush privileges;

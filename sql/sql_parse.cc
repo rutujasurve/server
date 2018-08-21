@@ -6658,7 +6658,7 @@ static bool check_rename_table(THD *thd, TABLE_LIST *first_table,
 
 bool
 check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
-             GRANT_INTERNAL_INFO *grant_internal_info,
+             ulong deny, GRANT_INTERNAL_INFO *grant_internal_info,
              bool dont_check_global_grants, bool no_errors)
 {
 #ifdef NO_EMBEDDED_ACCESS_CHECKS
@@ -6741,7 +6741,7 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
     }
   }
 
-  if ((sctx->master_access & want_access) == want_access)
+  if ((sctx->master_access & want_access) == want_access || !(want_access & deny))
   {
     /*
       1. If we don't have a global SELECT privilege, we have to get the
@@ -6836,7 +6836,7 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
   */
   if ( (db_access & want_access) == want_access ||
       (!dont_check_global_grants &&
-       need_table_or_column_check))
+       need_table_or_column_check) || !(want_access & deny))
   {
     /*
        Ok; but need to check table- and column privileges.
