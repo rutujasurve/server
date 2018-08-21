@@ -874,6 +874,9 @@ class User_table: public Grant_table_base
   { return get_field(1); }
   Field* password() const
   { return have_password() ? NULL : tl.table->field[2]; }
+  Field* deny() const
+  { return tl.table->field[33]; }
+
   /* Columns after privilege columns. */
   Field* ssl_type() const
   { return get_field(start_privilege_column + num_privileges()); }
@@ -974,6 +977,7 @@ class Db_table: public Grant_table_base
   Field* host() const { return tl.table->field[0]; }
   Field* db() const { return tl.table->field[1]; }
   Field* user() const { return tl.table->field[2]; }
+  Field* deny() const { return tl.table->field[23]; }
 
  private:
   friend class Grant_tables;
@@ -999,6 +1003,7 @@ class Tables_priv_table: public Grant_table_base
   Field* timestamp() const { return tl.table->field[5]; }
   Field* table_priv() const { return tl.table->field[6]; }
   Field* column_priv() const { return tl.table->field[7]; }
+  Field* deny() const { return tl.table->field[8]; }
 
  private:
   friend class Grant_tables;
@@ -1024,6 +1029,7 @@ class Columns_priv_table: public Grant_table_base
   Field* column_name() const { return tl.table->field[4]; }
   Field* timestamp() const { return tl.table->field[5]; }
   Field* column_priv() const { return tl.table->field[6]; }
+  Field* deny() const { return tl.table->field[7]; }
 
  private:
   friend class Grant_tables;
@@ -1044,6 +1050,7 @@ class Host_table: public Grant_table_base
  public:
   Field* host() const { return tl.table->field[0]; }
   Field* db() const { return tl.table->field[1]; }
+  Field* deny() const { return tl.table->field[20]; }
 
  private:
   friend class Grant_tables;
@@ -1070,6 +1077,7 @@ class Procs_priv_table: public Grant_table_base
   Field* grantor() const { return tl.table->field[5]; }
   Field* proc_priv() const { return tl.table->field[6]; }
   Field* timestamp() const { return tl.table->field[7]; }
+  Field* deny() const { return tl.table->field[8]; }
 
  private:
   friend class Grant_tables;
@@ -1745,6 +1753,9 @@ static bool acl_load(THD *thd, const Grant_tables& tables)
       ACL_HOST host;
       update_hostname(&host.host, get_field(&acl_memroot, host_table.host()));
       host.db= get_field(&acl_memroot, host_table.db());
+      host.deny= get_field(&acl_memroot, host_table.deny());
+      host.initial_deny= host.deny;
+
       if (lower_case_table_names && host.db)
       {
         /*
@@ -1853,6 +1864,8 @@ static bool acl_load(THD *thd, const Grant_tables& tables)
     char *username= get_field(&acl_memroot, user_table.user());
     user.user.str= username;
     user.user.length= safe_strlen(username);
+    user.deny= get_field(&acl_memroot, user_table.deny());
+    user.initial_deny= user.deny;
 
     /*
        If the user entry is a role, skip password and hostname checks
@@ -2064,6 +2077,8 @@ static bool acl_load(THD *thd, const Grant_tables& tables)
     ACL_DB db;
     char *db_name;
     db.user=get_field(&acl_memroot, db_table.user());
+    db.deny= get_field(&acl_memroot, db.deny());
+    db.initial_deny= db.deny;
     const char *hostname= get_field(&acl_memroot, db_table.host());
     if (!hostname && find_acl_role(db.user))
       hostname= "";
