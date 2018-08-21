@@ -16406,20 +16406,20 @@ deny:
         ;
 
 deny_command:
-          grant_privileges ON opt_table grant_ident TO_SYM grant_list
+          deny_privileges ON opt_table grant_ident TO_SYM grant_list
           opt_require_clause opt_grant_options
           {
             LEX *lex= Lex;
             lex->sql_command= SQLCOM_DENY;
             lex->type= 0;
           }
-        | grant_privileges ON FUNCTION_SYM grant_ident TO_SYM grant_list
+        | deny_privileges ON FUNCTION_SYM grant_ident TO_SYM grant_list
           opt_require_clause opt_grant_options
           {
             if (Lex->add_grant_command(thd, SQLCOM_DENY, TYPE_ENUM_FUNCTION))
               MYSQL_YYABORT;
           }
-        | grant_privileges ON PROCEDURE_SYM grant_ident TO_SYM grant_list
+        | deny_privileges ON PROCEDURE_SYM grant_ident TO_SYM grant_list
           opt_require_clause opt_grant_options
           {
             if (Lex->add_grant_command(thd, SQLCOM_DENY, TYPE_ENUM_PROCEDURE))
@@ -16545,6 +16545,16 @@ grant_role:
 opt_table:
           /* Empty */
         | TABLE_SYM
+        ;
+
+deny_privileges:
+          object_privilege_list {}
+        | ALL opt_privileges
+          { 
+            Lex->all_privileges= 0; 
+            Lex->deny= GLOBAL_ACLS;
+            Lex->grant= lex->grant_tot_col= 0;
+          }
         ;
 
 grant_privileges:
