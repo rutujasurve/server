@@ -1951,7 +1951,9 @@ bool my_yyoverflow(short **a, YYSTYPE **b, size_t *yystacksize);
         procedure_list procedure_list2 procedure_item
         field_def handler opt_generated_always
         opt_ignore opt_column opt_restrict
-        grant revoke deny set lock unlock string_list field_options
+        grant revoke
+        deny
+        set lock unlock string_list field_options
         opt_binary table_lock_list table_lock
         ref_list opt_match_clause opt_on_update_delete use
         opt_delete_options opt_delete_option varchar nchar nvarchar
@@ -16407,6 +16409,7 @@ deny:
         ;
 
 deny_command:
+	 
           deny_privileges ON opt_table grant_ident TO_SYM grant_list
           opt_require_clause opt_grant_options
           {
@@ -16414,12 +16417,14 @@ deny_command:
             lex->sql_command= SQLCOM_DENY;
             lex->type= 0;
           }
+	/*	
         | deny_privileges ON FUNCTION_SYM grant_ident TO_SYM grant_list
           opt_require_clause opt_grant_options
           {
             if (Lex->add_grant_command(thd, SQLCOM_DENY, TYPE_ENUM_FUNCTION))
               MYSQL_YYABORT;
           }
+	
         | deny_privileges ON PROCEDURE_SYM grant_ident TO_SYM grant_list
           opt_require_clause opt_grant_options
           {
@@ -16437,10 +16442,11 @@ deny_command:
           {
             LEX *lex= Lex;
             lex->sql_command= SQLCOM_DENY_ROLE;
-            /* The first role is the one that is denied */
+            // The first role is the one that is denied 
             if (Lex->users_list.push_front($1, thd->mem_root))
               MYSQL_YYABORT;
           }
+	*/
 
         ;
 
