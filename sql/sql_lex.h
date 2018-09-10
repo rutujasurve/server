@@ -2950,7 +2950,8 @@ public:
 
   uint profile_query_id;
   uint profile_options;
-  uint grant, grant_tot_col, which_columns;
+  uint grant, grant_tot_col, which_columns, deny_tot_col;
+  ulong deny;
   enum Foreign_key::fk_match_opt fk_match_option;
   enum_fk_option fk_update_opt;
   enum_fk_option fk_delete_opt;

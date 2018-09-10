@@ -3848,6 +3848,8 @@ SHOW_VAR com_status_vars[]= {
   {"create_user",          STMT_STATUS(SQLCOM_CREATE_USER)},
   {"create_view",          STMT_STATUS(SQLCOM_CREATE_VIEW)},
   {"dealloc_sql",          STMT_STATUS(SQLCOM_DEALLOCATE_PREPARE)},
+  {"deny",                     STMT_STATUS(SQLCOM_DENY)},
+  {"deny_role",                     STMT_STATUS(SQLCOM_DENY_ROLE)},
   {"delete",               STMT_STATUS(SQLCOM_DELETE)},
   {"delete_multi",         STMT_STATUS(SQLCOM_DELETE_MULTI)},
   {"do",                   STMT_STATUS(SQLCOM_DO)},

@@ -16560,7 +16560,7 @@ deny_privileges:
           { 
             Lex->all_privileges= 0; 
             Lex->deny= GLOBAL_ACLS;
-            Lex->grant= lex->grant_tot_col= 0;
+            //Lex->deny= lex->deny_tot_col= 0;
           }
         ;
 

@@ -1753,7 +1753,9 @@ static bool acl_load(THD *thd, const Grant_tables& tables)
       ACL_HOST host;
       update_hostname(&host.host, get_field(&acl_memroot, host_table.host()));
       host.db= get_field(&acl_memroot, host_table.db());
-      host.deny= get_field(&acl_memroot, host_table.deny());
+      char* deny_field = get_field(&acl_memroot, host_table.deny());
+      ulong* deny_ulong = reinterpret_cast<ulong *>(deny_field);
+      host.deny = *deny_ulong;
       host.initial_deny= host.deny;
 
       if (lower_case_table_names && host.db)
@@ -1864,7 +1866,9 @@ static bool acl_load(THD *thd, const Grant_tables& tables)
     char *username= get_field(&acl_memroot, user_table.user());
     user.user.str= username;
     user.user.length= safe_strlen(username);
-    user.deny= get_field(&acl_memroot, user_table.deny());
+    char* deny_field = get_field(&acl_memroot, user_table.deny());
+    ulong* deny_ulong = reinterpret_cast<ulong *>(deny_field);
+    user.deny = *deny_ulong;
     user.initial_deny= user.deny;
 
     /*
@@ -2077,7 +2081,9 @@ static bool acl_load(THD *thd, const Grant_tables& tables)
     ACL_DB db;
     char *db_name;
     db.user=get_field(&acl_memroot, db_table.user());
-    db.deny= get_field(&acl_memroot, db.deny());
+    char* deny_field = get_field(&acl_memroot, db_table.deny());
+    ulong* deny_ulong = reinterpret_cast<ulong *>(deny_field);;
+    db.deny = *deny_ulong;
     db.initial_deny= db.deny;
     const char *hostname= get_field(&acl_memroot, db_table.host());
     if (!hostname && find_acl_role(db.user))
