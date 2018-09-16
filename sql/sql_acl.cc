@@ -1713,6 +1713,252 @@ static bool set_user_plugin (ACL_USER *user, size_t password_len)
 }
 
 
+/**
+  @brief Compare requested privileges with the privileges acquired from the
+    User- and Db-tables.
+  @param thd          Thread handler
+  @param want_access  The requested access privileges.
+  @param db           A pointer to the Db name.
+  @param[out] save_priv A pointer to the granted privileges will be stored.
+  @param grant_internal_info A pointer to the internal grant cache.
+  @param dont_check_global_grants True if no global grants are checked.
+  @param no_error     True if no errors should be sent to the client.
+
+  'save_priv' is used to save the User-table (global) and Db-table grants for
+  the supplied db name. Note that we don't store db level grants if the global
+  grants is enough to satisfy the request AND the global grants contains a
+  SELECT grant.
+
+  For internal databases (INFORMATION_SCHEMA, PERFORMANCE_SCHEMA),
+  additional rules apply, see ACL_internal_schema_access.
+
+  @see check_grant
+
+  @return Status of denial of access by exclusive ACLs.
+    @retval FALSE Access can't exclusively be denied by Db- and User-table
+      access unless Column- and Table-grants are checked too.
+    @retval TRUE Access denied.
+*/
+
+bool
+check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
+              GRANT_INTERNAL_INFO *grant_internal_info,
+             bool dont_check_global_grants, bool no_errors)
+{
+#ifdef NO_EMBEDDED_ACCESS_CHECKS
+  if (save_priv)
+    *save_priv= GLOBAL_ACLS;
+  return false;
+#else
+  Security_context *sctx= thd->security_ctx;
+  ulong db_access;
+
+  /*
+    GRANT command:
+    In case of database level grant the database name may be a pattern,
+    in case of table|column level grant the database name can not be a pattern.
+    We use 'dont_check_global_grants' as a flag to determine
+    if it's database level grant command
+    (see SQLCOM_GRANT case, mysql_execute_command() function) and
+    set db_is_pattern according to 'dont_check_global_grants' value.
+  */
+  bool  db_is_pattern= ((want_access & GRANT_ACL) && dont_check_global_grants);
+  ulong dummy;
+  DBUG_ENTER("check_access");
+  DBUG_PRINT("enter",("db: %s  want_access: %lu  master_access: %lu",
+                      db ? db : "", want_access, sctx->master_access));
+
+  if (save_priv)
+    *save_priv=0;
+  else
+  {
+    save_priv= &dummy;
+    dummy= 0;
+  }
+
+  /* check access may be called twice in a row. Don't change to same stage */
+  if (thd->proc_info != stage_checking_permissions.m_name)
+    THD_STAGE_INFO(thd, stage_checking_permissions);
+  if (unlikely((!db || !db[0]) && !thd->db.str && !dont_check_global_grants))
+  {
+    DBUG_PRINT("error",("No database"));
+    if (!no_errors)
+      my_message(ER_NO_DB_ERROR, ER_THD(thd, ER_NO_DB_ERROR),
+                 MYF(0));                       /* purecov: tested */
+    DBUG_RETURN(TRUE);                /* purecov: tested */
+  }
+
+  if (likely((db != NULL) && (db != any_db)))
+  {
+    /*
+      Check if this is reserved database, like information schema or
+      performance schema
+    */
+    const ACL_internal_schema_access *access;
+    access= get_cached_schema_access(grant_internal_info, db);
+    if (access)
+    {
+      switch (access->check(want_access, save_priv))
+      {
+      case ACL_INTERNAL_ACCESS_GRANTED:
+        /*
+          All the privileges requested have been granted internally.
+          [out] *save_privileges= Internal privileges.
+        */
+        DBUG_RETURN(FALSE);
+      case ACL_INTERNAL_ACCESS_DENIED:
+        if (! no_errors)
+        {
+          status_var_increment(thd->status_var.access_denied_errors);
+          my_error(ER_DBACCESS_DENIED_ERROR, MYF(0),
+                   sctx->priv_user, sctx->priv_host, db);
+        }
+        DBUG_RETURN(TRUE);
+      case ACL_INTERNAL_ACCESS_CHECK_GRANT:
+        /*
+          Only some of the privilege requested have been granted internally,
+          proceed with the remaining bits of the request (want_access).
+        */
+        want_access&= ~(*save_priv);
+        break;
+      }
+    }
+  }
+
+  //Inserting deny logic here:
+  ulong deny = 0;
+  for (i=0 ; i < acl_dbs.elements ; i++)
+  {
+    ACL_DB *acl_db=dynamic_element(&acl_dbs,i,ACL_DB*);
+    if (!acl_db->db || !wild_compare(db,acl_db->db,db_is_pattern))
+    {
+      deny=acl_db->deny;
+      break; /* purecov: tested */
+    } 
+  }
+
+  if ((sctx->master_access & want_access) == want_access || !(want_access & deny))
+  {
+    /*
+      1. If we don't have a global SELECT privilege, we have to get the
+      database specific access rights to be able to handle queries of type
+      UPDATE t1 SET a=1 WHERE b > 0
+      2. Change db access if it isn't current db which is being addressed
+    */
+    if (!(sctx->master_access & SELECT_ACL))
+    {
+      if (db && (!thd->db.str || db_is_pattern || strcmp(db, thd->db.str)))
+      {
+        db_access= acl_get(sctx->host, sctx->ip, sctx->priv_user, db,
+                           db_is_pattern);
+        if (sctx->priv_role[0])
+          db_access|= acl_get("", "", sctx->priv_role, db, db_is_pattern);
+      }
+      else
+      {
+        /* get access for current db */
+        db_access= sctx->db_access;
+      }
+      /*
+        The effective privileges are the union of the global privileges
+        and the intersection of db- and host-privileges,
+        plus the internal privileges.
+      */
+      *save_priv|= sctx->master_access | db_access;
+    }
+    else
+      *save_priv|= sctx->master_access;
+    DBUG_RETURN(FALSE);
+  }
+  if (unlikely(((want_access & ~sctx->master_access) & ~DB_ACLS) ||
+               (! db && dont_check_global_grants)))
+  {                        // We can never grant this
+    DBUG_PRINT("error",("No possible access"));
+    if (!no_errors)
+    {
+      status_var_increment(thd->status_var.access_denied_errors);
+      my_error(access_denied_error_code(thd->password), MYF(0),
+               sctx->priv_user,
+               sctx->priv_host,
+               (thd->password ?
+                ER_THD(thd, ER_YES) :
+                ER_THD(thd, ER_NO)));                    /* purecov: tested */
+    }
+    DBUG_RETURN(TRUE);                /* purecov: tested */
+  }
+
+  if (unlikely(db == any_db))
+  {
+    /*
+      Access granted; Allow select on *any* db.
+      [out] *save_privileges= 0
+    */
+    DBUG_RETURN(FALSE);
+  }
+
+  if (db && (!thd->db.str || db_is_pattern || strcmp(db, thd->db.str)))
+  {
+    db_access= acl_get(sctx->host, sctx->ip, sctx->priv_user, db,
+                       db_is_pattern);
+    if (sctx->priv_role[0])
+    {
+      db_access|= acl_get("", "", sctx->priv_role, db, db_is_pattern);
+    }
+  }
+  else
+    db_access= sctx->db_access;
+  DBUG_PRINT("info",("db_access: %lu  want_access: %lu",
+                     db_access, want_access));
+
+  /*
+    Save the union of User-table and the intersection between Db-table and
+    Host-table privileges, with the already saved internal privileges.
+  */
+  db_access= (db_access | sctx->master_access);
+  *save_priv|= db_access;
+
+  /*
+    We need to investigate column- and table access if all requested privileges
+    belongs to the bit set of .
+  */
+  bool need_table_or_column_check=
+    (want_access & (TABLE_ACLS | PROC_ACLS | db_access)) == want_access;
+
+  /*
+    Grant access if the requested access is in the intersection of
+    host- and db-privileges (as retrieved from the acl cache),
+    also grant access if all the requested privileges are in the union of
+    TABLES_ACLS and PROC_ACLS; see check_grant.
+  */
+  if ( (db_access & want_access) == want_access ||
+      (!dont_check_global_grants &&
+       need_table_or_column_check) || !(want_access & deny))
+  {
+    /*
+       Ok; but need to check table- and column privileges.
+       [out] *save_privileges is (User-priv | (Db-priv & Host-priv) | Internal-priv)
+    */
+    DBUG_RETURN(FALSE);
+  }
+
+  /*
+    Access is denied;
+    [out] *save_privileges is (User-priv | (Db-priv & Host-priv) | Internal-priv)
+  */
+  DBUG_PRINT("error",("Access denied"));
+  if (!no_errors)
+  {
+    status_var_increment(thd->status_var.access_denied_errors);
+    my_error(ER_DBACCESS_DENIED_ERROR, MYF(0),
+             sctx->priv_user, sctx->priv_host,
+             (db ? db : (thd->db.str ?
+                         thd->db.str :
+                         "unknown")));
+  }
+  DBUG_RETURN(TRUE);
+#endif // NO_EMBEDDED_ACCESS_CHECKS
+}
+
 /*
   Initialize structures responsible for user/db-level privilege checking
   and load information about grants from open privilege tables.
