@@ -5544,6 +5544,12 @@ end_with_restore_list:
       my_ok(thd);
     break;
   }
+  case SQLCOM_DENY:
+  {
+    /* TODO empty for now! my_ok to keep the communication protocol happy. */
+    my_ok(thd);
+    break;
+  }
 #endif /*!NO_EMBEDDED_ACCESS_CHECKS*/
   case SQLCOM_RESET:
     /*

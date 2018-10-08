@@ -78,6 +78,24 @@ ALTER TABLE tables_priv
     COLLATE utf8_general_ci DEFAULT '' NOT NULL,
   COMMENT='Table privileges';
 
+-- Tables_priv reverse privileges.
+
+ALTER TABLE tables_priv
+  ADD Table_denied_priv set('Select','Insert','Update','Delete','Create',
+                             'Drop','Grant','References','Index','Alter',
+                             'Create View','Show view','Trigger','Delete versioning rows')
+    COLLATE utf8_general_ci DEFAULT '' NOT NULL,
+  ADD Column_denied_priv set('Select','Insert','Update','References')
+    COLLATE utf8_general_ci DEFAULT '' NOT NULL;
+
+ALTER TABLE tables_priv
+  MODIFY Table_denied_priv set('Select','Insert','Update','Delete','Create',
+                               'Drop','Grant','References','Index','Alter',
+                               'Create View','Show view','Trigger','Delete versioning rows')
+    COLLATE utf8_general_ci DEFAULT '' NOT NULL,
+  MODIFY Column_denied_priv set('Select','Insert','Update','References')
+    COLLATE utf8_general_ci DEFAULT '' NOT NULL;
+
 #
 # columns_priv
 #
@@ -100,6 +118,16 @@ ALTER TABLE columns_priv
 
 ALTER TABLE columns_priv
   MODIFY Column_priv set('Select','Insert','Update','References')
+    COLLATE utf8_general_ci DEFAULT '' NOT NULL;
+
+-- Columns_priv reverse privileges.
+
+ALTER TABLE columns_priv
+  ADD Column_denied_priv set('Select', 'Insert', 'Update', 'References')
+    COLLATE utf8_general_ci DEFAULT '' NOT NULL;
+
+ALTER TABLE columns_priv
+  MODIFY Column_denied_priv set('Select', 'Insert', 'Update', 'References')
     COLLATE utf8_general_ci DEFAULT '' NOT NULL;
 
 #
@@ -401,6 +429,14 @@ ALTER TABLE procs_priv
 ALTER TABLE procs_priv
   MODIFY Timestamp timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER Proc_priv;
 
+ALTER TABLE procs_priv
+  ADD Proc_denied_priv set('Execute','Alter Routine','Grant')
+    COLLATE utf8_general_ci DEFAULT '' NOT NULL AFTER Timestamp;
+
+ALTER TABLE procs_priv
+  MODIFY Proc_denied_priv set('Execute','Alter Routine','Grant')
+    COLLATE utf8_general_ci DEFAULT '' NOT NULL;
+
 #
 # proc
 #
@@ -684,6 +720,36 @@ ALTER TABLE user MODIFY plugin char(64) CHARACTER SET latin1 DEFAULT '' NOT NULL
 --  we want password_expired column to have collation utf8_general_ci.
 ALTER TABLE user MODIFY password_expired ENUM('N', 'Y') COLLATE utf8_general_ci DEFAULT 'N' NOT NULL;
 ALTER TABLE user MODIFY is_role enum('N', 'Y') COLLATE utf8_general_ci DEFAULT 'N' NOT NULL;
+
+-- Negative grants for user, host and db tables.
+-- We ADD in case the column is not there and we MODIFY to ensure the collation
+-- is utf8_general_ci post change to utf8_bin from above.
+ALTER TABLE user ADD Denied_priv set(
+  'Select', 'Insert', 'Update', 'Delete', 'Create', 'Drop', 'Reload',
+  'Shutdown', 'Process', 'File', 'Grant', 'References', 'Index', 'Alter',
+  'Show db', 'Super', 'Create tmp table', 'Lock tables', 'Execute',
+  'Repl slave', 'Repl client', 'Create view', 'Show view', 'Create routine',
+  'Alter routine', 'Create user', 'Event', 'Trigger', 'Create tablespace',
+  'Delete history') COLLATE utf8_general_ci DEFAULT '' NOT NULL AFTER max_statement_time;
+ALTER TABLE user MODIFY Denied_priv set(
+  'Select', 'Insert', 'Update', 'Delete', 'Create', 'Drop', 'Reload',
+  'Shutdown', 'Process', 'File', 'Grant', 'References', 'Index', 'Alter',
+  'Show db', 'Super', 'Create tmp table', 'Lock tables', 'Execute',
+  'Repl slave', 'Repl client', 'Create view', 'Show view', 'Create routine',
+  'Alter routine', 'Create user', 'Event', 'Trigger', 'Create tablespace',
+  'Delete history') COLLATE utf8_general_ci DEFAULT '' NOT NULL;
+
+
+ALTER TABLE db ADD Denied_priv set(
+  'Select', 'Insert', 'Update', 'Delete', 'Create', 'Drop', 'Grant',
+  'References', 'Index', 'Alter', 'Create_tmp_table_priv', 'Lock tables',
+  'Create view', 'Show view', 'Create routine', 'Alter routine', 'Execute',
+  'Event', 'Trigger', 'Delete history') COLLATE utf8_general_ci DEFAULT '' NOT NULL;
+ALTER TABLE db MODIFY Denied_priv set(
+  'Select', 'Insert', 'Update', 'Delete', 'Create', 'Drop', 'Grant',
+  'References', 'Index', 'Alter', 'Create_tmp_table_priv', 'Lock tables',
+  'Create view', 'Show view', 'Create routine', 'Alter routine', 'Execute',
+  'Event', 'Trigger', 'Delete history') COLLATE utf8_general_ci DEFAULT '' NOT NULL;
 
 -- Need to pre-fill mysql.proxies_priv with access for root even when upgrading from
 -- older versions
