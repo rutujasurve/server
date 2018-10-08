@@ -108,6 +108,7 @@ class ACL_ACCESS {
 public:
   ulong sort;
   ulong access;
+  ulong deny;
 };
 
 /* ACL_HOST is used if no host is specified */
@@ -145,6 +146,7 @@ public:
   LEX_CSTRING plugin;
   LEX_CSTRING auth_string;
   LEX_CSTRING default_rolename;
+  ulong initial_deny;
 
   ACL_USER *copy(MEM_ROOT *root)
   {
@@ -203,6 +205,7 @@ public:
     initial_role_access holds initial grants, as granted directly to the role
   */
   ulong initial_role_access;
+  ulong initial_role_deny;
   /*
     In subgraph traversal, when we need to traverse only a part of the graph
     (e.g. all direct and indirect grantees of a role X), the counter holds the
@@ -213,7 +216,7 @@ public:
   DYNAMIC_ARRAY parent_grantee; // array of backlinks to elements granted
 
   ACL_ROLE(ACL_USER * user, MEM_ROOT *mem);
-  ACL_ROLE(const char * rolename, ulong privileges, MEM_ROOT *mem);
+  ACL_ROLE(const char * rolename, ulong privileges, ulong denied_privileges, MEM_ROOT *mem);
 
 };
 
@@ -850,6 +853,9 @@ class User_table: public Grant_table_base
   { return get_field(1); }
   Field* password() const
   { return have_password() ? NULL : tl.table->field[2]; }
+  Field* denied_priv() const
+  { return get_field(start_privilege_column + num_privileges() + 14); }
+
   /* Columns after privilege columns. */
   Field* ssl_type() const
   { return get_field(start_privilege_column + num_privileges()); }
@@ -1344,10 +1350,12 @@ ACL_ROLE::ACL_ROLE(ACL_USER *user, MEM_ROOT *root) : counter(0)
   flags= IS_ROLE;
 }
 
-ACL_ROLE::ACL_ROLE(const char * rolename, ulong privileges, MEM_ROOT *root) :
+ACL_ROLE::ACL_ROLE(const char * rolename, ulong privileges, ulong denied_privileges, MEM_ROOT *root) :
   initial_role_access(privileges), counter(0)
+  //initial_role_deny(denied_privileges), counter(0)
 {
   this->access= initial_role_access;
+  this->deny= denied_privileges;
   this->user.str= safe_strdup_root(root, rolename);
   this->user.length= strlen(rolename);
   bzero(&role_grants, sizeof(role_grants));
@@ -1680,6 +1688,255 @@ static bool set_user_plugin (ACL_USER *user, size_t password_len)
   }
 }
 
+/**
+  @brief Compare requested privileges with the privileges acquired from the
+    User- and Db-tables.
+  @param thd          Thread handler
+  @param want_access  The requested access privileges.
+  @param db           A pointer to the Db name.
+  @param[out] save_priv A pointer to the granted privileges will be stored.
+  @param grant_internal_info A pointer to the internal grant cache.
+  @param dont_check_global_grants True if no global grants are checked.
+  @param no_error     True if no errors should be sent to the client.
+
+  'save_priv' is used to save the User-table (global) and Db-table grants for
+  the supplied db name. Note that we don't store db level grants if the global
+  grants is enough to satisfy the request AND the global grants contains a
+  SELECT grant.
+
+  For internal databases (INFORMATION_SCHEMA, PERFORMANCE_SCHEMA),
+  additional rules apply, see ACL_internal_schema_access.
+
+  @see check_grant
+
+  @return Status of denial of access by exclusive ACLs.
+    @retval FALSE Access can't exclusively be denied by Db- and User-table
+      access unless Column- and Table-grants are checked too.
+    @retval TRUE Access denied.
+*/
+
+bool
+check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
+              GRANT_INTERNAL_INFO *grant_internal_info,
+             bool dont_check_global_grants, bool no_errors)
+{
+#ifdef NO_EMBEDDED_ACCESS_CHECKS
+  if (save_priv)
+    *save_priv= GLOBAL_ACLS;
+  return false;
+#else
+  Security_context *sctx= thd->security_ctx;
+  ulong db_access;
+
+  /*
+    GRANT command:
+    In case of database level grant the database name may be a pattern,
+    in case of table|column level grant the database name can not be a pattern.
+    We use 'dont_check_global_grants' as a flag to determine
+    if it's database level grant command
+    (see SQLCOM_GRANT case, mysql_execute_command() function) and
+    set db_is_pattern according to 'dont_check_global_grants' value.
+  */
+  bool  db_is_pattern= ((want_access & GRANT_ACL) && dont_check_global_grants);
+  ulong dummy;
+  DBUG_ENTER("check_access");
+  DBUG_PRINT("enter",("db: %s  want_access: %lu  master_access: %lu",
+                      db ? db : "", want_access, sctx->master_access));
+
+  if (save_priv)
+    *save_priv=0;
+  else
+  {
+    save_priv= &dummy;
+    dummy= 0;
+  }
+
+  /* check access may be called twice in a row. Don't change to same stage */
+  if (thd->proc_info != stage_checking_permissions.m_name)
+    THD_STAGE_INFO(thd, stage_checking_permissions);
+  if ((!db || !db[0]) && !thd->db.str && !dont_check_global_grants)
+  {
+    DBUG_PRINT("error",("No database"));
+    if (!no_errors)
+      my_message(ER_NO_DB_ERROR, ER_THD(thd, ER_NO_DB_ERROR),
+                 MYF(0));                       /* purecov: tested */
+    DBUG_RETURN(TRUE);                /* purecov: tested */
+  }
+
+  if ((db != NULL) && (db != any_db))
+  {
+    /*
+      Check if this is reserved database, like information schema or
+      performance schema
+    */
+    const ACL_internal_schema_access *access;
+    access= get_cached_schema_access(grant_internal_info, db);
+    if (access)
+    {
+      switch (access->check(want_access, save_priv))
+      {
+      case ACL_INTERNAL_ACCESS_GRANTED:
+        /*
+          All the privileges requested have been granted internally.
+          [out] *save_privileges= Internal privileges.
+        */
+        DBUG_RETURN(FALSE);
+      case ACL_INTERNAL_ACCESS_DENIED:
+        if (! no_errors)
+        {
+          status_var_increment(thd->status_var.access_denied_errors);
+          my_error(ER_DBACCESS_DENIED_ERROR, MYF(0),
+                   sctx->priv_user, sctx->priv_host, db);
+        }
+        DBUG_RETURN(TRUE);
+      case ACL_INTERNAL_ACCESS_CHECK_GRANT:
+        /*
+          Only some of the privilege requested have been granted internally,
+          proceed with the remaining bits of the request (want_access).
+        */
+        want_access&= ~(*save_priv);
+        break;
+      }
+    }
+  }
+
+  if (initialized)
+  {
+    ulong global_deny = 0;
+    /* Check if we have a global DENY to enforce. */
+    mysql_mutex_lock(&acl_cache->lock);
+    ACL_USER_BASE *user_base= find_acl_user_base(sctx->priv_user, sctx->priv_host);
+    DBUG_ASSERT(user_base);
+    global_deny = user_base->deny;
+    mysql_mutex_unlock(&acl_cache->lock);
+    if (want_access & global_deny)
+    {
+      my_error(ER_ACCESS_DENIED_ERROR, MYF(0), sctx->priv_user, sctx->priv_host);
+      DBUG_RETURN(TRUE);
+    }
+  }
+
+  if ((sctx->master_access & want_access) == want_access)
+  {
+    /*
+      1. If we don't have a global SELECT privilege, we have to get the
+      database specific access rights to be able to handle queries of type
+      UPDATE t1 SET a=1 WHERE b > 0
+      2. Change db access if it isn't current db which is being addressed
+    */
+    if (!(sctx->master_access & SELECT_ACL))
+    {
+      if (db && (!thd->db.str || db_is_pattern || strcmp(db, thd->db.str)))
+      {
+        db_access= acl_get(sctx->host, sctx->ip, sctx->priv_user, db,
+                           db_is_pattern);
+        if (sctx->priv_role[0])
+          db_access|= acl_get("", "", sctx->priv_role, db, db_is_pattern);
+      }
+      else
+      {
+        /* get access for current db */
+        db_access= sctx->db_access;
+      }
+      /*
+        The effective privileges are the union of the global privileges
+        and the intersection of db- and host-privileges,
+        plus the internal privileges.
+      */
+      *save_priv|= sctx->master_access | db_access;
+    }
+    else
+      *save_priv|= sctx->master_access;
+    DBUG_RETURN(FALSE);
+  }
+  if (((want_access & ~sctx->master_access) & ~DB_ACLS) ||
+      (! db && dont_check_global_grants))
+  {                        // We can never grant this
+    DBUG_PRINT("error",("No possible access"));
+    if (!no_errors)
+    {
+      status_var_increment(thd->status_var.access_denied_errors);
+      my_error(access_denied_error_code(thd->password), MYF(0),
+               sctx->priv_user,
+               sctx->priv_host,
+               (thd->password ?
+                ER_THD(thd, ER_YES) :
+                ER_THD(thd, ER_NO)));                    /* purecov: tested */
+    }
+    DBUG_RETURN(TRUE);                /* purecov: tested */
+  }
+
+  if (db == any_db)
+  {
+    /*
+      Access granted; Allow select on *any* db.
+      [out] *save_privileges= 0
+    */
+    DBUG_RETURN(FALSE);
+  }
+
+  if (db && (!thd->db.str || db_is_pattern || strcmp(db, thd->db.str)))
+  {
+    db_access= acl_get(sctx->host, sctx->ip, sctx->priv_user, db,
+                       db_is_pattern);
+    if (sctx->priv_role[0])
+    {
+      db_access|= acl_get("", "", sctx->priv_role, db, db_is_pattern);
+    }
+  }
+  else
+    db_access= sctx->db_access;
+  DBUG_PRINT("info",("db_access: %lu  want_access: %lu",
+                     db_access, want_access));
+
+  /*
+    Save the union of User-table and the intersection between Db-table and
+    Host-table privileges, with the already saved internal privileges.
+  */
+  db_access= (db_access | sctx->master_access);
+  *save_priv|= db_access;
+
+  /*
+    We need to investigate column- and table access if all requested privileges
+    belongs to the bit set of .
+  */
+  bool need_table_or_column_check=
+    (want_access & (TABLE_ACLS | PROC_ACLS | db_access)) == want_access;
+
+  /*
+    Grant access if the requested access is in the intersection of
+    host- and db-privileges (as retrieved from the acl cache),
+    also grant access if all the requested privileges are in the union of
+    TABLES_ACLS and PROC_ACLS; see check_grant.
+  */
+  if ( (db_access & want_access) == want_access ||
+      (!dont_check_global_grants &&
+       need_table_or_column_check))
+  {
+    /*
+       Ok; but need to check table- and column privileges.
+       [out] *save_privileges is (User-priv | (Db-priv & Host-priv) | Internal-priv)
+    */
+    DBUG_RETURN(FALSE);
+  }
+
+  /*
+    Access is denied;
+    [out] *save_privileges is (User-priv | (Db-priv & Host-priv) | Internal-priv)
+  */
+  DBUG_PRINT("error",("Access denied"));
+  if (!no_errors)
+  {
+    status_var_increment(thd->status_var.access_denied_errors);
+    my_error(ER_DBACCESS_DENIED_ERROR, MYF(0),
+             sctx->priv_user, sctx->priv_host,
+             (db ? db : (thd->db.str ?
+                         thd->db.str :
+                         "unknown")));
+  }
+  DBUG_RETURN(TRUE);
+#endif // NO_EMBEDDED_ACCESS_CHECKS
+}
 
 /*
   Initialize structures responsible for user/db-level privilege checking
@@ -1829,6 +2086,8 @@ static bool acl_load(THD *thd, const Grant_tables& tables)
     char *username= get_field(&acl_memroot, user_table.user());
     user.user.str= username;
     user.user.length= safe_strlen(username);
+    user.deny= (ulong) user_table.denied_priv()->val_int();
+    user.initial_deny= user.deny;
 
     /*
        If the user entry is a role, skip password and hostname checks
@@ -2599,13 +2858,14 @@ static uchar* check_get_key(ACL_USER *buff, size_t *length,
 }
 
 
-static void acl_update_role(const char *rolename, ulong privileges)
+static void acl_update_role(const char *rolename, ulong privileges, ulong denied_privileges)
 {
   ACL_ROLE *role= find_acl_role(rolename);
-  if (role)
+  if (role){
     role->initial_role_access= role->access= privileges;
+    role->initial_role_deny= role->deny = denied_privileges;
+  }
 }
-
 
 static void acl_update_user(const char *user, const char *host,
 			    const char *password, size_t password_len,
@@ -2615,6 +2875,7 @@ static void acl_update_user(const char *user, const char *host,
 			    const char *x509_subject,
 			    USER_RESOURCES  *mqh,
 			    ulong privileges,
+                            ulong denied_privileges,
 			    const LEX_CSTRING *plugin,
 			    const LEX_CSTRING *auth)
 {
@@ -2643,6 +2904,7 @@ static void acl_update_user(const char *user, const char *host,
           set_user_plugin(acl_user, password_len);
         }
       acl_user->access=privileges;
+      acl_user->deny=denied_privileges;
       if (mqh->specified_limits & USER_RESOURCES::QUERIES_PER_HOUR)
         acl_user->user_resource.questions=mqh->questions;
       if (mqh->specified_limits & USER_RESOURCES::UPDATES_PER_HOUR)
@@ -2670,12 +2932,12 @@ static void acl_update_user(const char *user, const char *host,
 }
 
 
-static void acl_insert_role(const char *rolename, ulong privileges)
+static void acl_insert_role(const char *rolename, ulong privileges, ulong denied_privileges)
 {
   ACL_ROLE *entry;
 
   mysql_mutex_assert_owner(&acl_cache->lock);
-  entry= new (&acl_memroot) ACL_ROLE(rolename, privileges, &acl_memroot);
+  entry= new (&acl_memroot) ACL_ROLE(rolename, privileges, denied_privileges, &acl_memroot);
   (void) my_init_dynamic_array(&entry->parent_grantee,
                                sizeof(ACL_USER_BASE *), 8, 8, MYF(0));
   (void) my_init_dynamic_array(&entry->role_grants,sizeof(ACL_ROLE *),
@@ -2693,6 +2955,7 @@ static void acl_insert_user(const char *user, const char *host,
 			    const char *x509_subject,
 			    USER_RESOURCES *mqh,
 			    ulong privileges,
+                            ulong denied_privileges,
 			    const LEX_CSTRING *plugin,
 			    const LEX_CSTRING *auth)
 {
@@ -2723,6 +2986,7 @@ static void acl_insert_user(const char *user, const char *host,
 
   acl_user.flags= 0;
   acl_user.access=privileges;
+  acl_user.deny=denied_privileges;
   acl_user.user_resource = *mqh;
   acl_user.sort=get_sort(2, acl_user.host.hostname, acl_user.user.str);
   acl_user.hostname_length=(uint) strlen(host);
@@ -3882,7 +4146,7 @@ static bool test_if_create_new_users(THD *thd)
 static int replace_user_table(THD *thd, const User_table &user_table,
                               LEX_USER &combo,
                               ulong rights, bool revoke_grant,
-                              bool can_create_user, bool no_auto_create)
+                              bool can_create_user, bool no_auto_create, bool set_deny)
 {
   int error = -1;
   bool old_row_exists=0;
@@ -3996,6 +4260,11 @@ static int replace_user_table(THD *thd, const User_table &user_table,
 
   rights= user_table.get_access();
 
+  //Changes for updating user deny
+  ulong deny_user;
+  deny_user = 0;
+  if(set_deny==true)deny_user = 1;
+ 
   DBUG_PRINT("info",("table fields: %d", user_table.num_fields()));
   /* If we don't have a password column, we'll use the authentication_string
      column later. */
@@ -4154,7 +4423,7 @@ end:
     if (old_row_exists)
     {
       if (handle_as_role)
-        acl_update_role(combo.user.str, rights);
+        acl_update_role(combo.user.str, rights, deny_user);
       else
         acl_update_user(combo.user.str, combo.host.str,
                         combo.pwhash.str, combo.pwhash.length,
@@ -4164,13 +4433,14 @@ end:
                         lex->x509_subject,
                         &lex->mqh,
                         rights,
+                        deny_user,
                         &combo.plugin,
                         &combo.auth);
     }
     else
     {
       if (handle_as_role)
-        acl_insert_role(combo.user.str, rights);
+        acl_insert_role(combo.user.str, rights, deny_user);
       else
         acl_insert_user(combo.user.str, combo.host.str,
                         combo.pwhash.str, combo.pwhash.length,
@@ -4180,6 +4450,7 @@ end:
                         lex->x509_subject,
                         &lex->mqh,
                         rights,
+                        deny_user,
                         &combo.plugin,
                         &combo.auth);
     }
@@ -6470,7 +6741,7 @@ int mysql_table_grant(THD *thd, TABLE_LIST *table_list,
            replace_user_table(thd, tables.user_table(), *Str,
                                0, revoke_grant, create_new_users,
                                MY_TEST(thd->variables.sql_mode &
-                                       MODE_NO_AUTO_CREATE_USER));
+                                       MODE_NO_AUTO_CREATE_USER), false);
     if (unlikely(error))
     {
       result= TRUE;				// Remember error
@@ -6649,7 +6920,7 @@ bool mysql_routine_grant(THD *thd, TABLE_LIST *table_list,
         replace_user_table(thd, tables.user_table(), *Str,
 			   0, revoke_grant, create_new_users,
                            MY_TEST(thd->variables.sql_mode &
-                                     MODE_NO_AUTO_CREATE_USER)))
+                                     MODE_NO_AUTO_CREATE_USER), false))
     {
       result= TRUE;
       continue;
@@ -6924,7 +7195,7 @@ bool mysql_grant_role(THD *thd, List <LEX_USER> &list, bool revoke)
       if (copy_and_check_auth(&user_combo, &user_combo, thd) ||
           replace_user_table(thd, tables.user_table(), user_combo, 0,
                              false, create_new_user,
-                             no_auto_create_user))
+                             no_auto_create_user, false))
       {
         append_user(thd, &wrong_users, &username, &hostname);
         result= 1;
@@ -7035,7 +7306,7 @@ bool mysql_grant_role(THD *thd, List <LEX_USER> &list, bool revoke)
 
 
 bool mysql_grant(THD *thd, const char *db, List <LEX_USER> &list,
-                 ulong rights, bool revoke_grant, bool is_proxy)
+                 ulong rights, bool revoke_grant, bool is_proxy, bool set_deny)
 {
   List_iterator <LEX_USER> str_list (list);
   LEX_USER *Str, *tmp_Str, *proxied_user= NULL;
@@ -7095,7 +7366,7 @@ bool mysql_grant(THD *thd, const char *db, List <LEX_USER> &list,
         replace_user_table(thd, tables.user_table(), *Str,
                            (!db ? rights : 0), revoke_grant, create_new_users,
                            MY_TEST(thd->variables.sql_mode &
-                                   MODE_NO_AUTO_CREATE_USER)))
+                                   MODE_NO_AUTO_CREATE_USER), set_deny))
       result= true;
     else if (db)
     {
@@ -10218,7 +10489,7 @@ bool mysql_create_user(THD *thd, List <LEX_USER> &list, bool handle_as_role)
       }
     }
 
-    if (replace_user_table(thd, tables.user_table(), *user_name, 0, 0, 1, 0))
+    if (replace_user_table(thd, tables.user_table(), *user_name, 0, 0, 1, 0, 0))
     {
       append_user(thd, &wrong_users, user_name);
       result= TRUE;
@@ -10510,7 +10781,7 @@ int mysql_alter_user(THD* thd, List<LEX_USER> &users_list)
     if (!lex_user ||
         fix_lex_user(thd, lex_user) ||
         replace_user_table(thd, tables.user_table(), *lex_user, 0,
-                           false, false, true))
+                           false, false, true, false))
     {
       thd->clear_error();
       append_user(thd, &wrong_users, tmp_lex_user);
@@ -10635,7 +10906,7 @@ bool mysql_revoke_all(THD *thd,  List <LEX_USER> &list)
     }
 
     if (replace_user_table(thd, tables.user_table(), *lex_user,
-                           ~(ulong)0, 1, 0, 0))
+                           ~(ulong)0, 1, 0, 0, 0))
     {
       result= -1;
       continue;

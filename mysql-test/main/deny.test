@@ -1,0 +1,17 @@
+# Test basic DENY functionality
+
+# This test is still a work in progress.
+# TODO (remove this line once the feature is implemented completely.
+
+--echo #
+--echo # Test that status updating of commands works.
+--echo #
+show status like 'Com_deny';
+
+# For now this command should work and not produce any side effects.
+deny;
+
+--echo #
+--echo # Deny commands count should increase.
+--echo #
+show status like 'Com_deny';

@@ -978,6 +978,7 @@ bool my_yyoverflow(short **a, YYSTYPE **b, size_t *yystacksize);
 %token  DELETE_DOMAIN_ID_SYM
 %token  DELETE_SYM                    /* SQL-2003-R */
 %token  DENSE_RANK_SYM
+%token  DENY
 %token  DESC                          /* SQL-2003-N */
 %token  DESCRIBE                      /* SQL-2003-R */
 %token  DETERMINISTIC_SYM             /* SQL-2003-R */
@@ -1950,7 +1951,8 @@ bool my_yyoverflow(short **a, YYSTYPE **b, size_t *yystacksize);
         procedure_list procedure_list2 procedure_item
         field_def handler opt_generated_always
         opt_ignore opt_column opt_restrict
-        grant revoke set lock unlock string_list field_options
+        grant revoke deny
+        set lock unlock string_list field_options
         opt_binary table_lock_list table_lock
         ref_list opt_match_clause opt_on_update_delete use
         opt_delete_options opt_delete_option varchar nchar nvarchar
@@ -2159,6 +2161,7 @@ statement:
         | create
         | deallocate
         | delete
+        | deny
         | describe
         | do
         | drop
@@ -16397,6 +16400,20 @@ admin_option_for_role:
         { Lex->with_admin_option= true; $$= $4; }
       | grant_role
         { Lex->with_admin_option= false; $$= $1; }
+      ;
+
+deny:
+        DENY clear_privileges deny_command
+        {}
+      ;
+
+deny_command:
+         grant_privileges ON grant_ident TO_SYM grant_list
+         {
+           LEX *lex= Lex;
+           lex->sql_command= SQLCOM_DENY;
+           lex->type= 0;
+         }
       ;
 
 grant:

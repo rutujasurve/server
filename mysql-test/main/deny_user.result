@@ -1,0 +1,12 @@
+CREATE DATABASE test_database;
+CREATE USER foo;
+CREATE TABLE test_database.t1 (a int);
+INSERT INTO test_database.t1 values (1), (2);
+GRANT ALL ON test_database.* TO foo;
+select * from test_database.t1;
+a
+1
+2
+DENY SELECT ON *.* TO foo;
+select * from test_database.t1;
+ERROR 28000: Access denied for user 'foo'@'%' (using password: (null))
