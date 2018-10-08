@@ -183,6 +183,7 @@ static SYMBOL symbols[] = {
   { "DELAY_KEY_WRITE",	SYM(DELAY_KEY_WRITE_SYM)},
   { "DELETE",		SYM(DELETE_SYM)},
   { "DELETE_DOMAIN_ID", SYM(DELETE_DOMAIN_ID_SYM)},
+  { "DENY",             SYM(DENY)},
   { "DESC",		SYM(DESC)},
   { "DESCRIBE",		SYM(DESCRIBE)},
   { "DES_KEY_FILE",	SYM(DES_KEY_FILE)},

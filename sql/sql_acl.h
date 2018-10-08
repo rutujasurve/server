@@ -223,13 +223,13 @@ bool change_password(THD *thd, LEX_USER *user);
 
 bool mysql_grant_role(THD *thd, List<LEX_USER> &user_list, bool revoke);
 bool mysql_grant(THD *thd, const char *db, List <LEX_USER> &user_list,
-                 ulong rights, bool revoke, bool is_proxy);
+                 ulong rights, bool revoke, bool is_proxy, bool set_deny, bool db_deny);
 int mysql_table_grant(THD *thd, TABLE_LIST *table, List <LEX_USER> &user_list,
                        List <LEX_COLUMN> &column_list, ulong rights,
-                       bool revoke);
+                       bool is_denied, bool revoke);
 bool mysql_routine_grant(THD *thd, TABLE_LIST *table, const Sp_handler *sph,
                          List <LEX_USER> &user_list, ulong rights,
-                         bool revoke, bool write_to_binlog);
+                         bool revoke, bool denied, bool write_to_binlog);
 bool grant_init();
 void grant_free(void);
 bool grant_reload(THD *thd);

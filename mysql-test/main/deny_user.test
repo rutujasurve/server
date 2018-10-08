@@ -1,0 +1,44 @@
+CREATE DATABASE g;
+CREATE USER foo;
+CREATE USER bar;
+CREATE TABLE g.t1 (a int);
+INSERT INTO g.t1 values (1), (2);
+GRANT SELECT ON g.* TO foo;
+GRANT SELECT ON g.* TO bar;
+
+--change_user foo
+# This command should return both rows of t1.
+select * from g.t1;
+--change_user root
+DENY SELECT ON *.* TO foo;
+--change_user foo
+# The command should now fail with permission denied.
+--error ER_ACCESS_DENIED_ERROR
+select * from g.t1;
+--change_user bar
+select * from g.t1;
+--change_user root
+GRANT INSERT ON g.* TO foo;
+--change_user foo
+INSERT INTO g.t1 values (3), (4);
+--change_user root
+DENY INSERT ON *.* TO foo;
+select user, host, select_priv, denied_priv from mysql.user;
+--change_user foo
+--error ER_ACCESS_DENIED_ERROR
+INSERT INTO g.t1 values (3), (4);
+--change_user root
+flush privileges;
+--change_user foo
+--error ER_ACCESS_DENIED_ERROR
+INSERT INTO g.t1 values (3), (4);
+--error ER_ACCESS_DENIED_ERROR
+select * from g.t1;
+--change_user bar
+select * from g.t1;
+--change_user root
+drop user foo;
+drop user bar;
+drop database g;
+
+

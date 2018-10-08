@@ -1,0 +1,40 @@
+CREATE DATABASE foodb;
+USE foodb;
+CREATE TABLE t1(a INT, b INT);
+INSERT INTO t1 VALUES (1, 1);
+CREATE TABLE t2(a INT);
+INSERT INTO t2 VALUES (2);
+CREATE USER foo;
+GRANT SELECT(b) ON t1 TO foo;
+GRANT SELECT    ON t2 TO foo;
+CREATE PROCEDURE p1() SELECT b FROM t1;
+CREATE PROCEDURE p2() SELECT a FROM t2;
+GRANT EXECUTE ON PROCEDURE foodb.p1 TO foo;
+GRANT EXECUTE ON PROCEDURE foodb.p2 TO foo;
+CALL foodb.p1();
+b
+1
+CALL foodb.p2;
+a
+2
+show grants for foo;
+Grants for foo@%
+GRANT USAGE ON *.* TO 'foo'@'%'
+GRANT SELECT ON `foodb`.`t2` TO 'foo'@'%'
+GRANT SELECT (b) ON `foodb`.`t1` TO 'foo'@'%'
+GRANT EXECUTE ON PROCEDURE `foodb`.`p2` TO 'foo'@'%'
+GRANT EXECUTE ON PROCEDURE `foodb`.`p1` TO 'foo'@'%'
+select * from mysql.procs_priv where user='foo';
+Host	Db	User	Routine_name	Routine_type	Grantor	Proc_priv	Timestamp	Proc_denied_priv
+%	foodb	foo	p1	PROCEDURE	root@localhost	Execute	0000-00-00 00:00:00	
+%	foodb	foo	p2	PROCEDURE	root@localhost	Execute	0000-00-00 00:00:00	
+DENY EXECUTE ON PROCEDURE foodb.p1 TO foo;
+select * from mysql.procs_priv where user='foo';
+Host	Db	User	Routine_name	Routine_type	Grantor	Proc_priv	Timestamp	Proc_denied_priv
+%	foodb	foo	p1	PROCEDURE	root@localhost	Execute	0000-00-00 00:00:00	Execute
+%	foodb	foo	p2	PROCEDURE	root@localhost	Execute	0000-00-00 00:00:00	
+CALL foodb.p1();
+ERROR 42000: execute command denied to user 'foo'@'%' for routine 'foodb.p1'
+CALL foodb.p2();
+a
+2

@@ -1,0 +1,13 @@
+#
+# Test that status updating of commands works.
+#
+show status like 'Com_deny';
+Variable_name    Value
+Com_deny    0
+deny;
+#
+# Deny commands count should increase.
+#
+show status like 'Com_deny';
+Variable_name    Value
+Com_deny    1

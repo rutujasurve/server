@@ -3198,6 +3198,128 @@ bool Sql_cmd_call::execute(THD *thd)
 
 
 /**
+  Execute grant or deny depending on whether user is denied
+
+  @param thd                       Thread handle
+  @param deny_user                 If true, execute deny
+
+  @retval
+    FALSE       Error
+  @retval
+    TRUE        OK
+*/
+
+bool execute_grant_or_deny(THD *thd, bool deny_user, TABLE_LIST *all_tables,
+LEX  *lex, int res, SELECT_LEX *select_lex, TABLE_LIST *first_table)
+{
+    if (lex->type != TYPE_ENUM_PROXY &&
+        check_access(thd, lex->grant | lex->grant_tot_col | GRANT_ACL,
+                     first_table ?  first_table->db.str : select_lex->db.str,
+                     first_table ? &first_table->grant.privilege : NULL,
+                     first_table ? &first_table->grant.m_internal : NULL,
+                     first_table ? 0 : 1, 0))
+      return false;
+
+    /* Replicate current user as grantor */
+    thd->binlog_invoker(false);
+
+    if (thd->security_ctx->user)              // If not replication
+    {
+      LEX_USER *user;
+      bool first_user= TRUE;
+
+      List_iterator <LEX_USER> user_list(lex->users_list);
+      while ((user= user_list++))
+      {
+        if (specialflag & SPECIAL_NO_RESOLVE &&
+            hostname_requires_resolving(user->host.str))
+          push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN,
+                              ER_WARN_HOSTNAME_WONT_WORK,
+                              ER_THD(thd, ER_WARN_HOSTNAME_WONT_WORK));
+
+        /*
+          GRANT/REVOKE PROXY has the target user as a first entry in the list.
+         */
+        if (lex->type == TYPE_ENUM_PROXY && first_user)
+        {
+          if (!(user= get_current_user(thd, user)) || !user->host.str)
+            return false;
+
+          first_user= FALSE;
+          if (acl_check_proxy_grant_access (thd, user->host.str, user->user.str,
+                                        lex->grant & GRANT_ACL))
+            return false;
+        }
+      }
+    }
+    if (first_table)
+    {
+      const Sp_handler *sph= Sp_handler::handler((stored_procedure_type)
+                                                 lex->type);
+      if (sph)
+      {
+        uint grants= lex->all_privileges
+           ? (PROC_ACLS & ~GRANT_ACL) | (lex->grant & GRANT_ACL)
+           : lex->grant;
+        if (check_grant_routine(thd, grants | GRANT_ACL, all_tables, sph, 0))
+      return false;
+        /* Conditionally writes to binlog */
+        //WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
+        res= mysql_routine_grant(thd, all_tables, sph,
+                                 lex->users_list, grants,
+                                 lex->sql_command == SQLCOM_REVOKE, deny_user, TRUE);
+        if (!res)
+          my_ok(thd);
+      }
+      else
+      {
+    if (check_grant(thd,(lex->grant | lex->grant_tot_col | GRANT_ACL),
+                        all_tables, FALSE, UINT_MAX, FALSE))
+      return false;
+        /* Conditionally writes to binlog */
+        //WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
+        res= mysql_table_grant(thd, all_tables, lex->users_list,
+                   lex->columns, lex->grant,
+                   deny_user, lex->sql_command == SQLCOM_REVOKE);
+      }
+    }
+    else
+    {
+      if (lex->columns.elements || (lex->type && lex->type != TYPE_ENUM_PROXY))
+      {
+    my_message(ER_ILLEGAL_GRANT_FOR_TABLE, ER_THD(thd, ER_ILLEGAL_GRANT_FOR_TABLE),
+                   MYF(0));
+        return false;
+      }
+      else
+      {
+        //WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
+        /* Conditionally writes to binlog */
+        res= mysql_grant(thd, select_lex->db.str, lex->users_list, lex->grant,
+                         lex->sql_command == SQLCOM_REVOKE,
+                         lex->type == TYPE_ENUM_PROXY, deny_user, deny_user);
+      }
+      if (!res)
+      {
+    if (lex->sql_command == SQLCOM_GRANT)
+    {
+      List_iterator <LEX_USER> str_list(lex->users_list);
+      LEX_USER *user, *tmp_user;
+      while ((tmp_user=str_list++))
+          {
+            if (!(user= get_current_user(thd, tmp_user)))
+              return false;
+        reset_mqh(user, 0);
+          }
+    }
+      }
+    }
+
+    return true;
+}
+
+
+/**
   Execute command saved in thd and lex->sql_command.
 
   @param thd                       Thread handle
@@ -5431,108 +5553,8 @@ end_with_restore_list:
   case SQLCOM_REVOKE:
   case SQLCOM_GRANT:
   {
-    if (lex->type != TYPE_ENUM_PROXY &&
-        check_access(thd, lex->grant | lex->grant_tot_col | GRANT_ACL,
-                     first_table ?  first_table->db.str : select_lex->db.str,
-                     first_table ? &first_table->grant.privilege : NULL,
-                     first_table ? &first_table->grant.m_internal : NULL,
-                     first_table ? 0 : 1, 0))
-      goto error;
-
-    /* Replicate current user as grantor */
-    thd->binlog_invoker(false);
-
-    if (thd->security_ctx->user)              // If not replication
-    {
-      LEX_USER *user;
-      bool first_user= TRUE;
-
-      List_iterator <LEX_USER> user_list(lex->users_list);
-      while ((user= user_list++))
-      {
-        if (specialflag & SPECIAL_NO_RESOLVE &&
-            hostname_requires_resolving(user->host.str))
-          push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN,
-                              ER_WARN_HOSTNAME_WONT_WORK,
-                              ER_THD(thd, ER_WARN_HOSTNAME_WONT_WORK));
-
-        /*
-          GRANT/REVOKE PROXY has the target user as a first entry in the list. 
-         */
-        if (lex->type == TYPE_ENUM_PROXY && first_user)
-        {
-          if (!(user= get_current_user(thd, user)) || !user->host.str)
-            goto error;
-
-          first_user= FALSE;
-          if (acl_check_proxy_grant_access (thd, user->host.str, user->user.str,
-                                        lex->grant & GRANT_ACL))
-            goto error;
-        } 
-      }
-    }
-    if (first_table)
-    {
-      const Sp_handler *sph= Sp_handler::handler((stored_procedure_type)
-                                                 lex->type);
-      if (sph)
-      {
-        uint grants= lex->all_privileges 
-		   ? (PROC_ACLS & ~GRANT_ACL) | (lex->grant & GRANT_ACL)
-		   : lex->grant;
-        if (check_grant_routine(thd, grants | GRANT_ACL, all_tables, sph, 0))
-	  goto error;
-        /* Conditionally writes to binlog */
-        WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
-        res= mysql_routine_grant(thd, all_tables, sph,
-                                 lex->users_list, grants,
-                                 lex->sql_command == SQLCOM_REVOKE, TRUE);
-        if (!res)
-          my_ok(thd);
-      }
-      else
-      {
-	if (check_grant(thd,(lex->grant | lex->grant_tot_col | GRANT_ACL),
-                        all_tables, FALSE, UINT_MAX, FALSE))
-	  goto error;
-        /* Conditionally writes to binlog */
-        WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
-        res= mysql_table_grant(thd, all_tables, lex->users_list,
-			       lex->columns, lex->grant,
-			       lex->sql_command == SQLCOM_REVOKE);
-      }
-    }
-    else
-    {
-      if (lex->columns.elements || (lex->type && lex->type != TYPE_ENUM_PROXY))
-      {
-	my_message(ER_ILLEGAL_GRANT_FOR_TABLE, ER_THD(thd, ER_ILLEGAL_GRANT_FOR_TABLE),
-                   MYF(0));
-        goto error;
-      }
-      else
-      {
-        WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
-        /* Conditionally writes to binlog */
-        res= mysql_grant(thd, select_lex->db.str, lex->users_list, lex->grant,
-                         lex->sql_command == SQLCOM_REVOKE,
-                         lex->type == TYPE_ENUM_PROXY);
-      }
-      if (!res)
-      {
-	if (lex->sql_command == SQLCOM_GRANT)
-	{
-	  List_iterator <LEX_USER> str_list(lex->users_list);
-	  LEX_USER *user, *tmp_user;
-	  while ((tmp_user=str_list++))
-          {
-            if (!(user= get_current_user(thd, tmp_user)))
-              goto error;
-	    reset_mqh(user, 0);
-          }
-	}
-      }
-    }
+    bool execute_res = execute_grant_or_deny(thd, false, all_tables, lex, res, select_lex, first_table);
+    if(!execute_res) goto error;
     break;
   }
   case SQLCOM_REVOKE_ROLE:
@@ -5542,6 +5564,12 @@ end_with_restore_list:
     if (!(res= mysql_grant_role(thd, lex->users_list,
                                 lex->sql_command != SQLCOM_GRANT_ROLE)))
       my_ok(thd);
+    break;
+  }
+  case SQLCOM_DENY:
+  {
+    bool execute_res = execute_grant_or_deny(thd, true, all_tables, lex, res, select_lex, first_table);
+    if(!execute_res) goto error;
     break;
   }
 #endif /*!NO_EMBEDDED_ACCESS_CHECKS*/
@@ -6627,242 +6655,6 @@ static bool check_rename_table(THD *thd, TABLE_LIST *first_table,
 
   return 0;
 }
-
-
-/**
-  @brief Compare requested privileges with the privileges acquired from the
-    User- and Db-tables.
-  @param thd          Thread handler
-  @param want_access  The requested access privileges.
-  @param db           A pointer to the Db name.
-  @param[out] save_priv A pointer to the granted privileges will be stored.
-  @param grant_internal_info A pointer to the internal grant cache.
-  @param dont_check_global_grants True if no global grants are checked.
-  @param no_error     True if no errors should be sent to the client.
-
-  'save_priv' is used to save the User-table (global) and Db-table grants for
-  the supplied db name. Note that we don't store db level grants if the global
-  grants is enough to satisfy the request AND the global grants contains a
-  SELECT grant.
-
-  For internal databases (INFORMATION_SCHEMA, PERFORMANCE_SCHEMA),
-  additional rules apply, see ACL_internal_schema_access.
-
-  @see check_grant
-
-  @return Status of denial of access by exclusive ACLs.
-    @retval FALSE Access can't exclusively be denied by Db- and User-table
-      access unless Column- and Table-grants are checked too.
-    @retval TRUE Access denied.
-*/
-
-bool
-check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
-             GRANT_INTERNAL_INFO *grant_internal_info,
-             bool dont_check_global_grants, bool no_errors)
-{
-#ifdef NO_EMBEDDED_ACCESS_CHECKS
-  if (save_priv)
-    *save_priv= GLOBAL_ACLS;
-  return false;
-#else
-  Security_context *sctx= thd->security_ctx;
-  ulong db_access;
-
-  /*
-    GRANT command:
-    In case of database level grant the database name may be a pattern,
-    in case of table|column level grant the database name can not be a pattern.
-    We use 'dont_check_global_grants' as a flag to determine
-    if it's database level grant command
-    (see SQLCOM_GRANT case, mysql_execute_command() function) and
-    set db_is_pattern according to 'dont_check_global_grants' value.
-  */
-  bool  db_is_pattern= ((want_access & GRANT_ACL) && dont_check_global_grants);
-  ulong dummy;
-  DBUG_ENTER("check_access");
-  DBUG_PRINT("enter",("db: %s  want_access: %lu  master_access: %lu",
-                      db ? db : "", want_access, sctx->master_access));
-
-  if (save_priv)
-    *save_priv=0;
-  else
-  {
-    save_priv= &dummy;
-    dummy= 0;
-  }
-
-  /* check access may be called twice in a row. Don't change to same stage */
-  if (thd->proc_info != stage_checking_permissions.m_name)
-    THD_STAGE_INFO(thd, stage_checking_permissions);
-  if (unlikely((!db || !db[0]) && !thd->db.str && !dont_check_global_grants))
-  {
-    DBUG_PRINT("error",("No database"));
-    if (!no_errors)
-      my_message(ER_NO_DB_ERROR, ER_THD(thd, ER_NO_DB_ERROR),
-                 MYF(0));                       /* purecov: tested */
-    DBUG_RETURN(TRUE);				/* purecov: tested */
-  }
-
-  if (likely((db != NULL) && (db != any_db)))
-  {
-    /*
-      Check if this is reserved database, like information schema or
-      performance schema
-    */
-    const ACL_internal_schema_access *access;
-    access= get_cached_schema_access(grant_internal_info, db);
-    if (access)
-    {
-      switch (access->check(want_access, save_priv))
-      {
-      case ACL_INTERNAL_ACCESS_GRANTED:
-        /*
-          All the privileges requested have been granted internally.
-          [out] *save_privileges= Internal privileges.
-        */
-        DBUG_RETURN(FALSE);
-      case ACL_INTERNAL_ACCESS_DENIED:
-        if (! no_errors)
-        {
-          status_var_increment(thd->status_var.access_denied_errors);
-          my_error(ER_DBACCESS_DENIED_ERROR, MYF(0),
-                   sctx->priv_user, sctx->priv_host, db);
-        }
-        DBUG_RETURN(TRUE);
-      case ACL_INTERNAL_ACCESS_CHECK_GRANT:
-        /*
-          Only some of the privilege requested have been granted internally,
-          proceed with the remaining bits of the request (want_access).
-        */
-        want_access&= ~(*save_priv);
-        break;
-      }
-    }
-  }
-
-  if ((sctx->master_access & want_access) == want_access)
-  {
-    /*
-      1. If we don't have a global SELECT privilege, we have to get the
-      database specific access rights to be able to handle queries of type
-      UPDATE t1 SET a=1 WHERE b > 0
-      2. Change db access if it isn't current db which is being addressed
-    */
-    if (!(sctx->master_access & SELECT_ACL))
-    {
-      if (db && (!thd->db.str || db_is_pattern || strcmp(db, thd->db.str)))
-      {
-        db_access= acl_get(sctx->host, sctx->ip, sctx->priv_user, db,
-                           db_is_pattern);
-        if (sctx->priv_role[0])
-          db_access|= acl_get("", "", sctx->priv_role, db, db_is_pattern);
-      }
-      else
-      {
-        /* get access for current db */
-        db_access= sctx->db_access;
-      }
-      /*
-        The effective privileges are the union of the global privileges
-        and the intersection of db- and host-privileges,
-        plus the internal privileges.
-      */
-      *save_priv|= sctx->master_access | db_access;
-    }
-    else
-      *save_priv|= sctx->master_access;
-    DBUG_RETURN(FALSE);
-  }
-  if (unlikely(((want_access & ~sctx->master_access) & ~DB_ACLS) ||
-               (! db && dont_check_global_grants)))
-  {						// We can never grant this
-    DBUG_PRINT("error",("No possible access"));
-    if (!no_errors)
-    {
-      status_var_increment(thd->status_var.access_denied_errors);
-      my_error(access_denied_error_code(thd->password), MYF(0),
-               sctx->priv_user,
-               sctx->priv_host,
-               (thd->password ?
-                ER_THD(thd, ER_YES) :
-                ER_THD(thd, ER_NO)));                    /* purecov: tested */
-    }
-    DBUG_RETURN(TRUE);				/* purecov: tested */
-  }
-
-  if (unlikely(db == any_db))
-  {
-    /*
-      Access granted; Allow select on *any* db.
-      [out] *save_privileges= 0
-    */
-    DBUG_RETURN(FALSE);
-  }
-
-  if (db && (!thd->db.str || db_is_pattern || strcmp(db, thd->db.str)))
-  {
-    db_access= acl_get(sctx->host, sctx->ip, sctx->priv_user, db,
-                       db_is_pattern);
-    if (sctx->priv_role[0])
-    {
-      db_access|= acl_get("", "", sctx->priv_role, db, db_is_pattern);
-    }
-  }
-  else
-    db_access= sctx->db_access;
-  DBUG_PRINT("info",("db_access: %lu  want_access: %lu",
-                     db_access, want_access));
-
-  /*
-    Save the union of User-table and the intersection between Db-table and
-    Host-table privileges, with the already saved internal privileges.
-  */
-  db_access= (db_access | sctx->master_access);
-  *save_priv|= db_access;
-
-  /*
-    We need to investigate column- and table access if all requested privileges
-    belongs to the bit set of .
-  */
-  bool need_table_or_column_check=
-    (want_access & (TABLE_ACLS | PROC_ACLS | db_access)) == want_access;
-
-  /*
-    Grant access if the requested access is in the intersection of
-    host- and db-privileges (as retrieved from the acl cache),
-    also grant access if all the requested privileges are in the union of
-    TABLES_ACLS and PROC_ACLS; see check_grant.
-  */
-  if ( (db_access & want_access) == want_access ||
-      (!dont_check_global_grants &&
-       need_table_or_column_check))
-  {
-    /*
-       Ok; but need to check table- and column privileges.
-       [out] *save_privileges is (User-priv | (Db-priv & Host-priv) | Internal-priv)
-    */
-    DBUG_RETURN(FALSE);
-  }
-
-  /*
-    Access is denied;
-    [out] *save_privileges is (User-priv | (Db-priv & Host-priv) | Internal-priv)
-  */
-  DBUG_PRINT("error",("Access denied"));
-  if (!no_errors)
-  {
-    status_var_increment(thd->status_var.access_denied_errors);
-    my_error(ER_DBACCESS_DENIED_ERROR, MYF(0),
-             sctx->priv_user, sctx->priv_host,
-             (db ? db : (thd->db.str ?
-                         thd->db.str :
-                         "unknown")));
-  }
-  DBUG_RETURN(TRUE);
-#endif // NO_EMBEDDED_ACCESS_CHECKS
-}
-
 
 #ifndef NO_EMBEDDED_ACCESS_CHECKS
 /**

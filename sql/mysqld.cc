@@ -3850,6 +3850,7 @@ SHOW_VAR com_status_vars[]= {
   {"dealloc_sql",          STMT_STATUS(SQLCOM_DEALLOCATE_PREPARE)},
   {"delete",               STMT_STATUS(SQLCOM_DELETE)},
   {"delete_multi",         STMT_STATUS(SQLCOM_DELETE_MULTI)},
+  {"deny",                 STMT_STATUS(SQLCOM_DENY)},
   {"do",                   STMT_STATUS(SQLCOM_DO)},
   {"drop_db",              STMT_STATUS(SQLCOM_DROP_DB)},
   {"drop_event",           STMT_STATUS(SQLCOM_DROP_EVENT)},

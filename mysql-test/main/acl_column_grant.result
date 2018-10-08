@@ -1,0 +1,60 @@
+CREATE USER foo;
+CREATE DATABASE db_for_test;
+CREATE TABLE db_for_test.t1 (a int);
+INSERT INTO db_for_test.t1 values (1), (2), (3);
+CREATE TABLE db_for_test.t2 (a int, b int);
+INSERT INTO db_for_test.t2 values (1,2), (2,3), (3,4);
+CREATE TABLE db_for_test.t3 (a int);
+INSERT INTO db_for_test.t3 values (1), (2), (3);
+SHOW DATABASES;
+Database
+information_schema
+test
+USE db_for_test;
+ERROR 42000: Access denied for user 'foo'@'%' to database 'db_for_test'
+USE foodb;
+ERROR 42000: Access denied for user 'foo'@'%' to database 'foodb'
+SHOW TABLES FROM db_for_test;
+ERROR 42000: Access denied for user 'foo'@'%' to database 'db_for_test'
+SELECT * FROM db_for_test.t1;
+ERROR 42000: SELECT command denied to user 'foo'@'localhost' for table 't1'
+SELECT a FROM db_for_test.t1;
+ERROR 42000: SELECT command denied to user 'foo'@'localhost' for table 't1'
+SELECT b FROM db_for_test.t1;
+ERROR 42000: SELECT command denied to user 'foo'@'localhost' for table 't1'
+SELECT a,b FROM db_for_test.t1;
+ERROR 42000: SELECT command denied to user 'foo'@'localhost' for table 't1'
+USE db_for_test;
+GRANT SELECT(a) ON db_for_test.t1 TO foo;
+GRANT SELECT(a) ON db_for_test.t2 TO foo;
+SHOW DATABASES;
+Database
+db_for_test
+information_schema
+test
+USE db_for_test;
+SHOW TABLES FROM db_for_test;
+Tables_in_db_for_test
+t1
+t2
+SELECT * FROM db_for_test.t1;
+ERROR 42000: SELECT command denied to user 'foo'@'localhost' for table 't1'
+SELECT a FROM db_for_test.t1;
+ERROR 42000: SELECT command denied to user 'foo'@'localhost' for table 't1'
+SELECT b FROM db_for_test.t1;
+ERROR 42000: SELECT command denied to user 'foo'@'localhost' for table 't1'
+SELECT b FROM db_for_test.t2;
+ERROR 42000: SELECT command denied to user 'foo'@'localhost' for table 't2'
+SELECT * FROM INFORMATION_SCHEMA.columns WHERE TABLE_NAME='t2';
+TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	COLUMN_NAME	ORDINAL_POSITION	COLUMN_DEFAULT	IS_NULLABLE	DATA_TYPE	CHARACTER_MAXIMUM_LENGTH	CHARACTER_OCTET_LENGTH	NUMERIC_PRECISION	NUMERIC_SCALE	DATETIME_PRECISION	CHARACTER_SET_NAME	COLLATION_NAME	COLUMN_TYPE	COLUMN_KEY	EXTRA	PRIVILEGES	COLUMN_COMMENT	IS_GENERATED	GENERATION_EXPRESSION
+def	db_for_test	t2	a	1	NULL	YES	int	NULL	NULL	10	0	NULL	NULL	NULL	int(11)			select		NEVER	NULL
+GRANT SELECT ON db_for_test.t1 TO foo;
+GRANT SELECT ON db_for_test.t2 TO foo;
+DENY SELECT(a) ON db_for_test.t1 TO foo;
+DENY SELECT(a) ON db_for_test.t2 TO foo;
+SELECT b FROM db_for_test.t1;
+ERROR 42000: SELECT command denied to user 'foo'@'localhost' for table 't1'
+SELECT a FROM db_for_test.t1;
+ERROR 42000: SELECT command denied to user 'foo'@'localhost' for table 't1'
+SELECT b FROM db_for_test.t2;
+ERROR 42000: SELECT command denied to user 'foo'@'localhost' for table 't2'

@@ -1,0 +1,36 @@
+CREATE DATABASE foodb;
+
+USE foodb;
+CREATE TABLE t1(a INT, b INT);
+INSERT INTO t1 VALUES (1, 1);
+
+CREATE TABLE t2(a INT);
+INSERT INTO t2 VALUES (2);
+
+
+CREATE USER foo;
+GRANT SELECT(b) ON t1 TO foo;
+GRANT SELECT    ON t2 TO foo;
+
+CREATE PROCEDURE p1() SELECT b FROM t1;
+CREATE PROCEDURE p2() SELECT a FROM t2;
+
+GRANT EXECUTE ON PROCEDURE foodb.p1 TO foo;
+GRANT EXECUTE ON PROCEDURE foodb.p2 TO foo;
+
+--change_user foo
+
+CALL foodb.p1();
+CALL foodb.p2;
+
+--change_user root
+
+show grants for foo;
+select * from mysql.procs_priv where user='foo';
+DENY EXECUTE ON PROCEDURE foodb.p1 TO foo;
+select * from mysql.procs_priv where user='foo';
+
+--change_user foo
+--error ER_PROCACCESS_DENIED_ERROR
+CALL foodb.p1();
+CALL foodb.p2();

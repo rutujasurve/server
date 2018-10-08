@@ -1,0 +1,35 @@
+CREATE DATABASE foodatabase;
+CREATE USER foo;
+CREATE TABLE foodatabase.t1 (a int);
+INSERT INTO foodatabase.t1 values (1), (2), (3);
+CREATE TABLE foodatabase.t2 (a int);
+INSERT INTO foodatabase.t2 values (1), (2), (3);
+GRANT ALL ON foodatabase.* TO foo;
+select * from foodatabase.t1;
+a
+1
+2
+3
+select * from foodatabase.t2;
+a
+1
+2
+3
+select * from mysql.tables_priv;
+Host	Db	User	Table_name	Grantor	Timestamp	Table_priv	Column_priv	Table_denied_priv	Column_denied_priv
+DENY SELECT ON foodatabase.t1 TO foo;
+select * from mysql.tables_priv;
+Host	Db	User	Table_name	Grantor	Timestamp	Table_priv	Column_priv	Table_denied_priv	Column_denied_priv
+%	foodatabase	foo	t1	root@localhost	0000-00-00 00:00:00			Select	
+select * from foodatabase.t1;
+ERROR 42000: SELECT command denied to user 'foo'@'localhost' for table 't1'
+INSERT INTO foodatabase.t1 values (4);
+select * from foodatabase.t2;
+a
+1
+2
+3
+select * from foodatabase.t3;
+ERROR 42S02: Table 'foodatabase.t3' doesn't exist
+drop user foo;
+drop database foodatabase;

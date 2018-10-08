@@ -131,15 +131,15 @@ END//
 connection master;
 USE bug42217_db;
 SELECT * FROM mysql.procs_priv;
-Host	Db	User	Routine_name	Routine_type	Grantor	Proc_priv	Timestamp
-localhost	bug42217_db	create_rout_db	upgrade_del_func	FUNCTION	create_rout_db@localhost	Execute,Alter Routine	#
+Host    Db    User    Routine_name    Routine_type    Grantor    Proc_priv    Timestamp    Proc_denied_priv
+localhost    bug42217_db    create_rout_db    upgrade_del_func    FUNCTION    create_rout_db@localhost    Execute,Alter Routine    #    
 SELECT upgrade_del_func();
 upgrade_del_func()
 INSIDE upgrade_del_func()
 connection slave;
 SELECT * FROM mysql.procs_priv;
-Host	Db	User	Routine_name	Routine_type	Grantor	Proc_priv	Timestamp
-localhost	bug42217_db	create_rout_db	upgrade_del_func	FUNCTION	create_rout_db@localhost	Execute,Alter Routine	#
+Host    Db    User    Routine_name    Routine_type    Grantor    Proc_priv    Timestamp    Proc_denied_priv
+localhost    bug42217_db    create_rout_db    upgrade_del_func    FUNCTION    create_rout_db@localhost    Execute,Alter Routine    #    
 SHOW GRANTS FOR 'create_rout_db'@'localhost';
 Grants for create_rout_db@localhost
 GRANT USAGE ON *.* TO 'create_rout_db'@'localhost' IDENTIFIED BY PASSWORD '*08792480350CBA057BDE781B9DF183B263934601'
@@ -195,7 +195,7 @@ RETURN "INSIDE upgrade_alter_func()";
 END	latin1	latin1_swedish_ci	latin1_swedish_ci
 "Should no privilege record for upgrade_alter_func in mysql.procs_priv"
 SELECT * FROM mysql.procs_priv;
-Host	Db	User	Routine_name	Routine_type	Grantor	Proc_priv	Timestamp
+Host    Db    User    Routine_name    Routine_type    Grantor    Proc_priv    Timestamp    Proc_denied_priv
 SELECT upgrade_alter_func();
 ERROR HY000: The user specified as a definer ('create_rout_db'@'localhost') does not exist
 disconnect create_rout_db_master;

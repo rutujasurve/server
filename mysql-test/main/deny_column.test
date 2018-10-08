@@ -1,0 +1,28 @@
+CREATE DATABASE foodatabase;
+CREATE USER foo;
+CREATE TABLE foodatabase.t1 (a int, b int);
+INSERT INTO foodatabase.t1 values (1,1), (2,2), (3,3);
+CREATE TABLE foodatabase.t2 (a int);
+INSERT INTO foodatabase.t2 values (1), (2), (3);
+GRANT ALL ON foodatabase.t2 TO foo;
+#GRANT ALL ON foodatabase.t1 TO foo;
+GRANT SELECT(a) on foodatabase.t1 to foo;
+GRANT SELECT(b) on foodatabase.t1 to foo;
+--change_user foo
+# This command should return both rows of t1.
+select a from foodatabase.t1;
+select * from foodatabase.t2;
+--change_user root
+select user, host, db, table_name, column_name, column_priv from mysql.columns_priv;
+DENY SELECT(a) ON foodatabase.t1 TO foo;
+select user, host, db, table_name, column_name, column_priv from mysql.columns_priv;
+select * from mysql.columns_priv;
+--change_user foo
+# The command should now fail with permission denied.
+#select b from foodatabase.t1;
+--error ER_COLUMNACCESS_DENIED_ERROR
+select a from foodatabase.t1;
+select b from foodatabase.t1;
+--change_user root
+drop user foo;
+drop database foodatabase;
