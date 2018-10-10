@@ -9,6 +9,6 @@ GRANT ALL ON test_database.* TO foo;
 select * from test_database.t1;
 --change_user root
 DENY SELECT ON *.* TO foo;
---change_user foo;
+--change_user foo
 # The command should now fail with permission denied.
 select * from test_database.t1;
