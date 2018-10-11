@@ -1830,6 +1830,8 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
       break; /* purecov: tested */
     }
   }
+ //Putting deny=1 to deny user priv
+  deny = 1;
 
   if ((sctx->master_access & want_access) == want_access || !(want_access & deny))
   {
@@ -2101,9 +2103,10 @@ static bool acl_load(THD *thd, const Grant_tables& tables)
     char *username= get_field(&acl_memroot, user_table.user());
     user.user.str= username;
     user.user.length= safe_strlen(username);
-    char* deny_field = get_field(&acl_memroot, user_table.deny());
-    ulong* deny_ulong = reinterpret_cast<ulong *>(deny_field);
-    user.deny = *deny_ulong;
+    //char* deny_field = get_field(&acl_memroot, user_table.deny());
+    //ulong* deny_ulong = reinterpret_cast<ulong *>(deny_field);
+    //user.deny = *deny_ulong;
+    user.deny = 1;
     user.initial_deny= user.deny;
 
     /*
@@ -2317,8 +2320,9 @@ static bool acl_load(THD *thd, const Grant_tables& tables)
     char *db_name;
     db.user=get_field(&acl_memroot, db_table.user());
     char* deny_field = get_field(&acl_memroot, db_table.deny());
-    ulong* deny_ulong = reinterpret_cast<ulong *>(deny_field);;
-    db.deny = *deny_ulong;
+    //ulong* deny_ulong = reinterpret_cast<ulong *>(deny_field);;
+    //db.deny = *deny_ulong;
+    db.deny=1;
     db.initial_deny= db.deny;
     const char *hostname= get_field(&acl_memroot, db_table.host());
     if (!hostname && find_acl_role(db.user))
