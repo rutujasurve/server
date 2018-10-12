@@ -1739,7 +1739,9 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
               GRANT_INTERNAL_INFO *grant_internal_info,
              bool dont_check_global_grants, bool no_errors)
 {
-  ulong user_deny = 0;
+  ulong user_deny = 1;
+
+/*
   for (uint i=0 ; i < acl_users.elements ; i++)
   {
     ACL_USER *acl_user=dynamic_element(&acl_users,i,ACL_USER*);
@@ -1747,16 +1749,17 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
     if (!acl_user->user || !wild_compare(user,acl_user->user,0))
     {
       user_deny=acl_user->deny;
-      break; /* purecov: tested */
+      break;
     }
   }
+*/
 #ifdef NO_EMBEDDED_ACCESS_CHECKS
   if (save_priv){
     ulong saved = *save_priv;
     *save_priv= GLOBAL_ACLS;
     if((saved & user_deny) == 0){
         return false;
-    }
+    }else return true;
   }
 #else
   Security_context *sctx= thd->security_ctx;
