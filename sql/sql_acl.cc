@@ -225,7 +225,6 @@ public:
   acl_host_and_ip host;
   const char *user,*db;
   ulong initial_access; /* access bits present in the table */
-  ulong initial_deny;
 };
 
 #ifndef DBUG_OFF
@@ -805,26 +804,6 @@ class Grant_table_base
     return access_bits;
   }
 
-  /*
-    Get deny bits from table from the deny field index.
-
-    IMPLEMENTATION
-    The record should be already read in table->record[0]. All deny privileges
-    are specified as a SET of privileges.
-
-    SYNOPSIS
-      get_deny()
-      deny_field_idx   The field index at which the deny specification
-                         exists.
-    RETURN VALUE
-      deny
-  */
-  ulong get_deny(uint deny_field_idx) const
-  {
-    ulong deny = (ulong) tl.table->field[deny_field_idx]->val_int();
-    return deny;
-  }
-
   /* Compute how many privilege columns this table has. This method
      can only be called after the table has been opened.
 
@@ -873,8 +852,8 @@ class User_table: public Grant_table_base
   { return get_field(1); }
   Field* password() const
   { return have_password() ? NULL : tl.table->field[2]; }
-  Field* deny() const
-  { return tl.table->field[33]; }
+  Field* denied_priv() const
+  { return get_field(start_privilege_column + num_privileges() + 14); }
 
   /* Columns after privilege columns. */
   Field* ssl_type() const
@@ -976,7 +955,6 @@ class Db_table: public Grant_table_base
   Field* host() const { return tl.table->field[0]; }
   Field* db() const { return tl.table->field[1]; }
   Field* user() const { return tl.table->field[2]; }
-  Field* deny() const { return tl.table->field[23]; }
 
  private:
   friend class Grant_tables;
@@ -1739,28 +1717,10 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
               GRANT_INTERNAL_INFO *grant_internal_info,
              bool dont_check_global_grants, bool no_errors)
 {
-  ulong user_deny = 1;
-
-/*
-  for (uint i=0 ; i < acl_users.elements ; i++)
-  {
-    ACL_USER *acl_user=dynamic_element(&acl_users,i,ACL_USER*);
-
-    if (!acl_user->user || !wild_compare(user,acl_user->user,0))
-    {
-      user_deny=acl_user->deny;
-      break;
-    }
-  }
-*/
 #ifdef NO_EMBEDDED_ACCESS_CHECKS
-  if (save_priv){
-    ulong saved = *save_priv;
+  if (save_priv)
     *save_priv= GLOBAL_ACLS;
-    if((saved & user_deny) == 0){
-        return false;
-    }else return true;
-  }
+  return false;
 #else
   Security_context *sctx= thd->security_ctx;
   ulong db_access;
@@ -1791,7 +1751,7 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
   /* check access may be called twice in a row. Don't change to same stage */
   if (thd->proc_info != stage_checking_permissions.m_name)
     THD_STAGE_INFO(thd, stage_checking_permissions);
-  if (unlikely((!db || !db[0]) && !thd->db.str && !dont_check_global_grants))
+  if ((!db || !db[0]) && !thd->db.str && !dont_check_global_grants)
   {
     DBUG_PRINT("error",("No database"));
     if (!no_errors)
@@ -1800,7 +1760,7 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
     DBUG_RETURN(TRUE);                /* purecov: tested */
   }
 
-  if (likely((db != NULL) && (db != any_db)))
+  if ((db != NULL) && (db != any_db))
   {
     /*
       Check if this is reserved database, like information schema or
@@ -1837,21 +1797,23 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
     }
   }
 
-  //Inserting deny logic here:
-  ulong deny = 0;
-  for (uint i=0 ; i < acl_dbs.elements ; i++)
+  if (initialized)
   {
-    ACL_DB *acl_db=dynamic_element(&acl_dbs,i,ACL_DB*);
-    if (!acl_db->db || !wild_compare(db,acl_db->db,db_is_pattern))
+    ulong global_deny = 0;
+    /* Check if we have a global DENY to enforce. */
+    mysql_mutex_lock(&acl_cache->lock);
+    ACL_USER_BASE *user_base= find_acl_user_base(sctx->priv_user, sctx->priv_host);
+    DBUG_ASSERT(user_base);
+    global_deny = user_base->deny;
+    mysql_mutex_unlock(&acl_cache->lock);
+    if (want_access & global_deny)
     {
-      deny=acl_db->deny;
-      break; /* purecov: tested */
+      my_error(ER_ACCESS_DENIED_ERROR, MYF(0), sctx->priv_user, sctx->priv_host);
+      DBUG_RETURN(TRUE);
     }
   }
- //Putting deny=1 to deny user priv
-  deny = 1;
 
-  if ((sctx->master_access & want_access) == want_access || !(want_access & deny))
+  if ((sctx->master_access & want_access) == want_access)
   {
     /*
       1. If we don't have a global SELECT privilege, we have to get the
@@ -1884,8 +1846,8 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
       *save_priv|= sctx->master_access;
     DBUG_RETURN(FALSE);
   }
-  if (unlikely(((want_access & ~sctx->master_access) & ~DB_ACLS) ||
-               (! db && dont_check_global_grants)))
+  if (((want_access & ~sctx->master_access) & ~DB_ACLS) ||
+      (! db && dont_check_global_grants))
   {                        // We can never grant this
     DBUG_PRINT("error",("No possible access"));
     if (!no_errors)
@@ -1901,7 +1863,7 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
     DBUG_RETURN(TRUE);                /* purecov: tested */
   }
 
-  if (unlikely(db == any_db))
+  if (db == any_db)
   {
     /*
       Access granted; Allow select on *any* db.
@@ -1946,7 +1908,7 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
   */
   if ( (db_access & want_access) == want_access ||
       (!dont_check_global_grants &&
-       need_table_or_column_check) || !(want_access & deny))
+       need_table_or_column_check))
   {
     /*
        Ok; but need to check table- and column privileges.
@@ -2121,10 +2083,7 @@ static bool acl_load(THD *thd, const Grant_tables& tables)
     char *username= get_field(&acl_memroot, user_table.user());
     user.user.str= username;
     user.user.length= safe_strlen(username);
-    //char* deny_field = get_field(&acl_memroot, user_table.deny());
-    //ulong* deny_ulong = reinterpret_cast<ulong *>(deny_field);
-    //user.deny = *deny_ulong;
-    user.deny = 1;
+    user.deny= (ulong) user_table.denied_priv()->val_int();
     user.initial_deny= user.deny;
 
     /*
@@ -2337,11 +2296,6 @@ static bool acl_load(THD *thd, const Grant_tables& tables)
     ACL_DB db;
     char *db_name;
     db.user=get_field(&acl_memroot, db_table.user());
-    char* deny_field = get_field(&acl_memroot, db_table.deny());
-    //ulong* deny_ulong = reinterpret_cast<ulong *>(deny_field);;
-    //db.deny = *deny_ulong;
-    db.deny=1;
-    db.initial_deny= db.deny;
     const char *hostname= get_field(&acl_memroot, db_table.host());
     if (!hostname && find_acl_role(db.user))
       hostname= "";
