@@ -1,0 +1,19 @@
+CREATE DATABASE test_database;
+CREATE DATABASE test_db;
+CREATE USER foo;
+CREATE TABLE test_database.t1 (a int);
+INSERT INTO test_database.t1 values (1), (2);
+GRANT ALL ON test_database.* TO foo;
+CREATE TABLE test_db.t1 (a int);
+INSERT INTO test_db.t1 values (1), (2);
+GRANT ALL ON test_db.* TO foo;
+--change_user foo
+# This command should return both rows of t1.
+select * from test_database.t1;
+select * from test_db.t1;
+--change_user root
+DENY SELECT ON test_database.* TO foo;
+--change_user foo
+select * from test_db.t1;
+# The command should now fail with permission denied.
+select * from test_database.t1;
