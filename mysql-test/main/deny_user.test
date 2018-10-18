@@ -2,12 +2,12 @@ CREATE DATABASE test_database;
 CREATE USER foo;
 CREATE TABLE test_database.t1 (a int);
 INSERT INTO test_database.t1 values (1), (2);
-#GRANT ALL ON test_database.* TO foo;
+GRANT ALL ON test_database.* TO foo;
 
-#--change_user foo
+--change_user foo
 # This command should return both rows of t1.
-#select * from test_database.t1;
-#--change_user root
+select * from test_database.t1;
+--change_user root
 DENY SELECT ON *.* TO foo;
 --change_user foo
 # The command should now fail with permission denied.
