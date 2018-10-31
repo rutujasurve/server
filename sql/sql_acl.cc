@@ -7552,6 +7552,7 @@ static bool grant_load(THD *thd,
 	delete mem_check;
 	goto end_unlock;
       }
+      ulong deny_priv = t_table->field[8]->val_int();//index 8, col 9
     }
     while (!t_table->file->ha_index_next(t_table->record[0]));
   }
@@ -7773,6 +7774,7 @@ bool check_grant(THD *thd, ulong want_access, TABLE_LIST *tables,
   ulong original_want_access= want_access;
   bool locked= 0;
   GRANT_TABLE *grant_table;
+  TABLE *tables_priv;
   GRANT_TABLE *grant_table_role= NULL;
   DBUG_ENTER("check_grant");
   DBUG_ASSERT(number > 0);
@@ -7904,6 +7906,10 @@ bool check_grant(THD *thd, ulong want_access, TABLE_LIST *tables,
                                    sctx->priv_user,
                                    t_ref->get_table_name(),
                                    FALSE);
+
+    tables_priv = grant_table;
+    tables_priv->file->ha_index_init(0, 1);
+
     if (sctx->priv_role[0])
       grant_table_role= table_hash_search("", NULL, t_ref->get_db_name(),
                                           sctx->priv_role,
