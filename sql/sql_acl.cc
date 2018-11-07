@@ -7774,7 +7774,7 @@ bool check_grant(THD *thd, ulong want_access, TABLE_LIST *tables,
   ulong original_want_access= want_access;
   bool locked= 0;
   GRANT_TABLE *grant_table;
-  TABLE *tables_priv;
+  GRANT_TABLE *tables_priv;
   GRANT_TABLE *grant_table_role= NULL;
   DBUG_ENTER("check_grant");
   DBUG_ASSERT(number > 0);
@@ -7908,7 +7908,7 @@ bool check_grant(THD *thd, ulong want_access, TABLE_LIST *tables,
                                    FALSE);
 
     tables_priv = grant_table;
-    tables_priv->file->ha_index_init(0, 1);
+    //tables_priv->file->ha_index_init(0, 1);
 
     if (sctx->priv_role[0])
       grant_table_role= table_hash_search("", NULL, t_ref->get_db_name(),
@@ -7935,8 +7935,10 @@ bool check_grant(THD *thd, ulong want_access, TABLE_LIST *tables,
     t_ref->grant.privilege|= grant_table ? grant_table->privs : 0;
     t_ref->grant.privilege|= grant_table_role ? grant_table_role->privs : 0;
     t_ref->grant.want_privilege= ((want_access & COL_ACLS) & ~t_ref->grant.privilege);
-
-    if (!(~t_ref->grant.privilege & want_access))
+ 
+    //DENY LOGIC HERE
+    ulong deny =0;
+    if (!(~t_ref->grant.privilege & want_access)&&!(want_access&deny))
       continue;
 
     if ((want_access&= ~((grant_table ? grant_table->cols : 0) |
@@ -8021,6 +8023,15 @@ bool check_grant_column(THD *thd, GRANT_INFO *grant,
   grant_table= grant->grant_table_user;
   grant_table_role= grant->grant_table_role;
 
+  (void) my_hash_init(&column_priv_hash, &my_charset_utf8_bin,
+                       0,0,0, (my_hash_get_key) get_grant_table,
+                       (my_hash_free_key) free_grant_table,0);
+
+  GRANT_TABLE *grant_col_table= (GRANT_TABLE *) my_hash_element(&column_priv_hash, 0);
+  //Columns_priv_table& columns_priv;//How to fetch columns_priv_Table from GRANT_TABLE?
+  //ulong deny = columns_priv.table()->field[7]->val_int();
+  ulong deny = 0;
+
   if (!grant_table && !grant_table_role)
     goto err;
 
@@ -8040,7 +8051,7 @@ bool check_grant_column(THD *thd, GRANT_INFO *grant,
       want_access&= ~grant_column->rights;
     }
   }
-  if (!want_access)
+  if (!want_access && !(want_access&deny))
   {
     mysql_rwlock_unlock(&LOCK_grant);
     DBUG_RETURN(0);
