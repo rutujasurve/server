@@ -4146,7 +4146,7 @@ static bool test_if_create_new_users(THD *thd)
 static int replace_user_table(THD *thd, const User_table &user_table,
                               LEX_USER &combo,
                               ulong rights, bool revoke_grant,
-                              bool can_create_user, bool no_auto_create)
+                              bool can_create_user, bool no_auto_create, bool set_deny)
 {
   int error = -1;
   bool old_row_exists=0;
@@ -4262,7 +4262,8 @@ static int replace_user_table(THD *thd, const User_table &user_table,
 
   //Changes for updating user deny
   ulong deny_user;
-  deny_user  = user_table.denied_priv()->val_int();
+  deny_user = 0;
+  if(set_deny==true)deny_user = 1;
  
   DBUG_PRINT("info",("table fields: %d", user_table.num_fields()));
   /* If we don't have a password column, we'll use the authentication_string
@@ -6740,7 +6741,7 @@ int mysql_table_grant(THD *thd, TABLE_LIST *table_list,
            replace_user_table(thd, tables.user_table(), *Str,
                                0, revoke_grant, create_new_users,
                                MY_TEST(thd->variables.sql_mode &
-                                       MODE_NO_AUTO_CREATE_USER));
+                                       MODE_NO_AUTO_CREATE_USER), false);
     if (unlikely(error))
     {
       result= TRUE;				// Remember error
@@ -6919,7 +6920,7 @@ bool mysql_routine_grant(THD *thd, TABLE_LIST *table_list,
         replace_user_table(thd, tables.user_table(), *Str,
 			   0, revoke_grant, create_new_users,
                            MY_TEST(thd->variables.sql_mode &
-                                     MODE_NO_AUTO_CREATE_USER)))
+                                     MODE_NO_AUTO_CREATE_USER), false))
     {
       result= TRUE;
       continue;
@@ -7194,7 +7195,7 @@ bool mysql_grant_role(THD *thd, List <LEX_USER> &list, bool revoke)
       if (copy_and_check_auth(&user_combo, &user_combo, thd) ||
           replace_user_table(thd, tables.user_table(), user_combo, 0,
                              false, create_new_user,
-                             no_auto_create_user))
+                             no_auto_create_user, false))
       {
         append_user(thd, &wrong_users, &username, &hostname);
         result= 1;
@@ -7305,7 +7306,7 @@ bool mysql_grant_role(THD *thd, List <LEX_USER> &list, bool revoke)
 
 
 bool mysql_grant(THD *thd, const char *db, List <LEX_USER> &list,
-                 ulong rights, bool revoke_grant, bool is_proxy)
+                 ulong rights, bool revoke_grant, bool is_proxy, bool set_deny)
 {
   List_iterator <LEX_USER> str_list (list);
   LEX_USER *Str, *tmp_Str, *proxied_user= NULL;
@@ -7365,7 +7366,7 @@ bool mysql_grant(THD *thd, const char *db, List <LEX_USER> &list,
         replace_user_table(thd, tables.user_table(), *Str,
                            (!db ? rights : 0), revoke_grant, create_new_users,
                            MY_TEST(thd->variables.sql_mode &
-                                   MODE_NO_AUTO_CREATE_USER)))
+                                   MODE_NO_AUTO_CREATE_USER), set_deny))
       result= true;
     else if (db)
     {
@@ -10488,7 +10489,7 @@ bool mysql_create_user(THD *thd, List <LEX_USER> &list, bool handle_as_role)
       }
     }
 
-    if (replace_user_table(thd, tables.user_table(), *user_name, 0, 0, 1, 0))
+    if (replace_user_table(thd, tables.user_table(), *user_name, 0, 0, 1, 0, 0))
     {
       append_user(thd, &wrong_users, user_name);
       result= TRUE;
@@ -10780,7 +10781,7 @@ int mysql_alter_user(THD* thd, List<LEX_USER> &users_list)
     if (!lex_user ||
         fix_lex_user(thd, lex_user) ||
         replace_user_table(thd, tables.user_table(), *lex_user, 0,
-                           false, false, true))
+                           false, false, true, false))
     {
       thd->clear_error();
       append_user(thd, &wrong_users, tmp_lex_user);
@@ -10905,7 +10906,7 @@ bool mysql_revoke_all(THD *thd,  List <LEX_USER> &list)
     }
 
     if (replace_user_table(thd, tables.user_table(), *lex_user,
-                           ~(ulong)0, 1, 0, 0))
+                           ~(ulong)0, 1, 0, 0, 0))
     {
       result= -1;
       continue;
