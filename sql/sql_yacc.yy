@@ -16403,7 +16403,7 @@ admin_option_for_role:
       ;
 
 deny:
-        DENY deny_command
+        DENY clear_privileges deny_command
         {}
       ;
 

@@ -9,6 +9,4 @@ a
 2
 DENY SELECT ON *.* TO foo;
 select * from test_database.t1;
-a
-1
-2
+ERROR 28000: Access denied for user 'foo'@'%' (using password: (null))

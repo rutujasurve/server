@@ -11,4 +11,5 @@ select * from test_database.t1;
 DENY SELECT ON *.* TO foo;
 --change_user foo
 # The command should now fail with permission denied.
+--error ER_ACCESS_DENIED_ERROR
 select * from test_database.t1;
