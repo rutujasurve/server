@@ -226,6 +226,7 @@ public:
   acl_host_and_ip host;
   const char *user,*db;
   ulong initial_access; /* access bits present in the table */
+  ulong initial_deny;
 };
 
 #ifndef DBUG_OFF
@@ -956,6 +957,7 @@ class Db_table: public Grant_table_base
   Field* host() const { return tl.table->field[0]; }
   Field* db() const { return tl.table->field[1]; }
   Field* user() const { return tl.table->field[2]; }
+  Field* denied_priv() const { return tl.table->field[(start_privilege_column + num_privileges())]; }
 
  private:
   friend class Grant_tables;
@@ -1814,6 +1816,27 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
       my_error(ER_ACCESS_DENIED_ERROR, MYF(0), sctx->priv_user, sctx->priv_host);
       DBUG_RETURN(TRUE);
     }
+    //Check for db level deny
+    ulong db_deny = 0;
+    for (uint i=0 ; i < acl_dbs.elements ; i++)
+    {
+      ACL_DB *acl_db=dynamic_element(&acl_dbs,i,ACL_DB*);
+      if (!acl_db->db || !wild_compare(db,acl_db->db,db_is_pattern))
+      {
+        db_deny=acl_db->deny;
+        break;
+      }
+    }
+    if (want_access & db_deny)
+    {
+      status_var_increment(thd->status_var.access_denied_errors);
+      my_error(ER_DBACCESS_DENIED_ERROR, MYF(0),
+               sctx->priv_user, sctx->priv_host,
+               (db ? db : (thd->db.str ?
+                           thd->db.str :
+                            "unknown")));
+      DBUG_RETURN(TRUE);
+    }
   }
 
   if ((sctx->master_access & want_access) == want_access)
@@ -2299,6 +2322,8 @@ static bool acl_load(THD *thd, const Grant_tables& tables)
     ACL_DB db;
     char *db_name;
     db.user=get_field(&acl_memroot, db_table.user());
+    db.deny= (ulong) db_table.denied_priv()->val_int();
+    db.initial_deny= db.deny;
     const char *hostname= get_field(&acl_memroot, db_table.host());
     if (!hostname && find_acl_role(db.user))
       hostname= "";
