@@ -3198,6 +3198,128 @@ bool Sql_cmd_call::execute(THD *thd)
 
 
 /**
+  Execute grant or deny depending on whether user is denied
+
+  @param thd                       Thread handle
+  @param deny_user                 If true, execute deny
+
+  @retval
+    FALSE       Error
+  @retval
+    TRUE        OK
+*/
+
+bool execute_grant_or_deny(THD *thd, bool deny_user, TABLE_LIST *all_tables,
+LEX  *lex, int res, SELECT_LEX *select_lex, TABLE_LIST *first_table)
+{
+    if (lex->type != TYPE_ENUM_PROXY &&
+        check_access(thd, lex->grant | lex->grant_tot_col | GRANT_ACL,
+                     first_table ?  first_table->db.str : select_lex->db.str,
+                     first_table ? &first_table->grant.privilege : NULL,
+                     first_table ? &first_table->grant.m_internal : NULL,
+                     first_table ? 0 : 1, 0))
+      return false;
+
+    /* Replicate current user as grantor */
+    thd->binlog_invoker(false);
+
+    if (thd->security_ctx->user)              // If not replication
+    {
+      LEX_USER *user;
+      bool first_user= TRUE;
+
+      List_iterator <LEX_USER> user_list(lex->users_list);
+      while ((user= user_list++))
+      {
+        if (specialflag & SPECIAL_NO_RESOLVE &&
+            hostname_requires_resolving(user->host.str))
+          push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN,
+                              ER_WARN_HOSTNAME_WONT_WORK,
+                              ER_THD(thd, ER_WARN_HOSTNAME_WONT_WORK));
+
+        /*
+          GRANT/REVOKE PROXY has the target user as a first entry in the list.
+         */
+        if (lex->type == TYPE_ENUM_PROXY && first_user)
+        {
+          if (!(user= get_current_user(thd, user)) || !user->host.str)
+            return false;
+
+          first_user= FALSE;
+          if (acl_check_proxy_grant_access (thd, user->host.str, user->user.str,
+                                        lex->grant & GRANT_ACL))
+            return false;
+        }
+      }
+    }
+    if (first_table)
+    {
+      const Sp_handler *sph= Sp_handler::handler((stored_procedure_type)
+                                                 lex->type);
+      if (sph)
+      {
+        uint grants= lex->all_privileges
+           ? (PROC_ACLS & ~GRANT_ACL) | (lex->grant & GRANT_ACL)
+           : lex->grant;
+        if (check_grant_routine(thd, grants | GRANT_ACL, all_tables, sph, 0))
+      return false;
+        /* Conditionally writes to binlog */
+        //WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
+        res= mysql_routine_grant(thd, all_tables, sph,
+                                 lex->users_list, grants,
+                                 lex->sql_command == SQLCOM_REVOKE, TRUE);
+        if (!res)
+          my_ok(thd);
+      }
+      else
+      {
+    if (check_grant(thd,(lex->grant | lex->grant_tot_col | GRANT_ACL),
+                        all_tables, FALSE, UINT_MAX, FALSE))
+      return false;
+        /* Conditionally writes to binlog */
+        //WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
+        res= mysql_table_grant(thd, all_tables, lex->users_list,
+                   lex->columns, lex->grant,
+                   lex->sql_command == SQLCOM_REVOKE);
+      }
+    }
+    else
+    {
+      if (lex->columns.elements || (lex->type && lex->type != TYPE_ENUM_PROXY))
+      {
+    my_message(ER_ILLEGAL_GRANT_FOR_TABLE, ER_THD(thd, ER_ILLEGAL_GRANT_FOR_TABLE),
+                   MYF(0));
+        return false;
+      }
+      else
+      {
+        //WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
+        /* Conditionally writes to binlog */
+        res= mysql_grant(thd, select_lex->db.str, lex->users_list, lex->grant,
+                         lex->sql_command == SQLCOM_REVOKE,
+                         lex->type == TYPE_ENUM_PROXY, deny_user);
+      }
+      if (!res)
+      {
+    if (lex->sql_command == SQLCOM_GRANT)
+    {
+      List_iterator <LEX_USER> str_list(lex->users_list);
+      LEX_USER *user, *tmp_user;
+      while ((tmp_user=str_list++))
+          {
+            if (!(user= get_current_user(thd, tmp_user)))
+              return false;
+        reset_mqh(user, 0);
+          }
+    }
+      }
+    }
+
+    return true;
+}
+
+
+/**
   Execute command saved in thd and lex->sql_command.
 
   @param thd                       Thread handle
@@ -5431,108 +5553,8 @@ end_with_restore_list:
   case SQLCOM_REVOKE:
   case SQLCOM_GRANT:
   {
-    if (lex->type != TYPE_ENUM_PROXY &&
-        check_access(thd, lex->grant | lex->grant_tot_col | GRANT_ACL,
-                     first_table ?  first_table->db.str : select_lex->db.str,
-                     first_table ? &first_table->grant.privilege : NULL,
-                     first_table ? &first_table->grant.m_internal : NULL,
-                     first_table ? 0 : 1, 0))
-      goto error;
-
-    /* Replicate current user as grantor */
-    thd->binlog_invoker(false);
-
-    if (thd->security_ctx->user)              // If not replication
-    {
-      LEX_USER *user;
-      bool first_user= TRUE;
-
-      List_iterator <LEX_USER> user_list(lex->users_list);
-      while ((user= user_list++))
-      {
-        if (specialflag & SPECIAL_NO_RESOLVE &&
-            hostname_requires_resolving(user->host.str))
-          push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN,
-                              ER_WARN_HOSTNAME_WONT_WORK,
-                              ER_THD(thd, ER_WARN_HOSTNAME_WONT_WORK));
-
-        /*
-          GRANT/REVOKE PROXY has the target user as a first entry in the list. 
-         */
-        if (lex->type == TYPE_ENUM_PROXY && first_user)
-        {
-          if (!(user= get_current_user(thd, user)) || !user->host.str)
-            goto error;
-
-          first_user= FALSE;
-          if (acl_check_proxy_grant_access (thd, user->host.str, user->user.str,
-                                        lex->grant & GRANT_ACL))
-            goto error;
-        } 
-      }
-    }
-    if (first_table)
-    {
-      const Sp_handler *sph= Sp_handler::handler((stored_procedure_type)
-                                                 lex->type);
-      if (sph)
-      {
-        uint grants= lex->all_privileges 
-		   ? (PROC_ACLS & ~GRANT_ACL) | (lex->grant & GRANT_ACL)
-		   : lex->grant;
-        if (check_grant_routine(thd, grants | GRANT_ACL, all_tables, sph, 0))
-	  goto error;
-        /* Conditionally writes to binlog */
-        WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
-        res= mysql_routine_grant(thd, all_tables, sph,
-                                 lex->users_list, grants,
-                                 lex->sql_command == SQLCOM_REVOKE, TRUE);
-        if (!res)
-          my_ok(thd);
-      }
-      else
-      {
-	if (check_grant(thd,(lex->grant | lex->grant_tot_col | GRANT_ACL),
-                        all_tables, FALSE, UINT_MAX, FALSE))
-	  goto error;
-        /* Conditionally writes to binlog */
-        WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
-        res= mysql_table_grant(thd, all_tables, lex->users_list,
-			       lex->columns, lex->grant,
-			       lex->sql_command == SQLCOM_REVOKE);
-      }
-    }
-    else
-    {
-      if (lex->columns.elements || (lex->type && lex->type != TYPE_ENUM_PROXY))
-      {
-	my_message(ER_ILLEGAL_GRANT_FOR_TABLE, ER_THD(thd, ER_ILLEGAL_GRANT_FOR_TABLE),
-                   MYF(0));
-        goto error;
-      }
-      else
-      {
-        WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
-        /* Conditionally writes to binlog */
-        res= mysql_grant(thd, select_lex->db.str, lex->users_list, lex->grant,
-                         lex->sql_command == SQLCOM_REVOKE,
-                         lex->type == TYPE_ENUM_PROXY, false);
-      }
-      if (!res)
-      {
-	if (lex->sql_command == SQLCOM_GRANT)
-	{
-	  List_iterator <LEX_USER> str_list(lex->users_list);
-	  LEX_USER *user, *tmp_user;
-	  while ((tmp_user=str_list++))
-          {
-            if (!(user= get_current_user(thd, tmp_user)))
-              goto error;
-	    reset_mqh(user, 0);
-          }
-	}
-      }
-    }
+    bool execute_res = execute_grant_or_deny(thd, false, all_tables, lex, res, select_lex, first_table);
+    if(!execute_res) goto error;
     break;
   }
   case SQLCOM_REVOKE_ROLE:
@@ -5546,110 +5568,8 @@ end_with_restore_list:
   }
   case SQLCOM_DENY:
   {
-    if (lex->type != TYPE_ENUM_PROXY &&
-    check_access(thd, lex->grant | lex->grant_tot_col | GRANT_ACL,
-                 first_table ?  first_table->db.str : select_lex->db.str,
-                 first_table ? &first_table->grant.privilege : NULL,
-                 first_table ? &first_table->grant.m_internal : NULL,
-                 first_table ? 0 : 1, 0))
-      goto error;
-
-    /* Replicate current user as grantor */
-    thd->binlog_invoker(false);
-
-    if (thd->security_ctx->user)              // If not replication
-    {
-      LEX_USER *user;
-      bool first_user= TRUE;
-
-      List_iterator <LEX_USER> user_list(lex->users_list);
-      while ((user= user_list++))
-      {
-        if (specialflag & SPECIAL_NO_RESOLVE &&
-            hostname_requires_resolving(user->host.str))
-          push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN,
-                              ER_WARN_HOSTNAME_WONT_WORK,
-                              ER_THD(thd, ER_WARN_HOSTNAME_WONT_WORK));
-
-        /*
-          GRANT/REVOKE PROXY has the target user as a first entry in the list.
-         */
-        if (lex->type == TYPE_ENUM_PROXY && first_user)
-        {
-          if (!(user= get_current_user(thd, user)) || !user->host.str)
-            goto error;
-
-          first_user= FALSE;
-          if (acl_check_proxy_grant_access (thd, user->host.str, user->user.str,
-                                        lex->grant & GRANT_ACL))
-            goto error;
-        }
-      }
-    }
-    if (first_table)
-    {
-      const Sp_handler *sph= Sp_handler::handler((stored_procedure_type)
-                                                 lex->type);
-      if (sph)
-      {
-        uint grants= lex->all_privileges
-           ? (PROC_ACLS & ~GRANT_ACL) | (lex->grant & GRANT_ACL)
-           : lex->grant;
-        if (check_grant_routine(thd, grants | GRANT_ACL, all_tables, sph, 0))
-      goto error;
-        /* Conditionally writes to binlog */
-        WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
-        res= mysql_routine_grant(thd, all_tables, sph,
-                                 lex->users_list, grants,
-                                 lex->sql_command == SQLCOM_REVOKE, TRUE);
-        if (!res)
-          my_ok(thd);
-      }
-      else
-      {
-    if (check_grant(thd,(lex->grant | lex->grant_tot_col | GRANT_ACL),
-                        all_tables, FALSE, UINT_MAX, FALSE))
-      goto error;
-        /* Conditionally writes to binlog */
-        WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
-        res= mysql_table_grant(thd, all_tables, lex->users_list,
-                   lex->columns, lex->grant,
-                   lex->sql_command == SQLCOM_REVOKE);
-      }
-    }
-    else
-    {
-      if (lex->columns.elements || (lex->type && lex->type != TYPE_ENUM_PROXY))
-      {
-    my_message(ER_ILLEGAL_GRANT_FOR_TABLE, ER_THD(thd, ER_ILLEGAL_GRANT_FOR_TABLE),
-                   MYF(0));
-        goto error;
-      }
-      else
-      {
-        WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
-        /* Conditionally writes to binlog */
-        //add deny boolean here
-        res= mysql_grant(thd, select_lex->db.str, lex->users_list, lex->grant,
-                         lex->sql_command == SQLCOM_REVOKE,
-                         lex->type == TYPE_ENUM_PROXY, true);
-      }
-      if (!res)
-      {
-    if (lex->sql_command == SQLCOM_GRANT)
-    {
-      List_iterator <LEX_USER> str_list(lex->users_list);
-      LEX_USER *user, *tmp_user;
-      while ((tmp_user=str_list++))
-          {
-            if (!(user= get_current_user(thd, tmp_user)))
-              goto error;
-        reset_mqh(user, 0);
-          }
-    }
-      }
-    }
-    //my_ok(thd);
+    bool execute_res = execute_grant_or_deny(thd, true, all_tables, lex, res, select_lex, first_table);
+    if(!execute_res) goto error;
     break;
   }
 #endif /*!NO_EMBEDDED_ACCESS_CHECKS*/
