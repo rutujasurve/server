@@ -1821,7 +1821,7 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
     for (uint i=0 ; i < acl_dbs.elements ; i++)
     {
       ACL_DB *acl_db=dynamic_element(&acl_dbs,i,ACL_DB*);
-      if (!acl_db->db || !wild_compare(db,acl_db->db,db_is_pattern))
+      if (acl_db->db && wild_compare(db,acl_db->db,db_is_pattern))
       {
         db_deny=acl_db->deny;
         break;
