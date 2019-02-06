@@ -1806,6 +1806,7 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
   {
     ulong global_deny = 0;
     /* Check if we have a global DENY to enforce. */
+    /*
     mysql_mutex_lock(&acl_cache->lock);
     ACL_USER_BASE *user_base= find_acl_user_base(sctx->priv_user, sctx->priv_host);
     DBUG_ASSERT(user_base);
@@ -1816,19 +1817,26 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
       my_error(ER_ACCESS_DENIED_ERROR, MYF(0), sctx->priv_user, sctx->priv_host);
       DBUG_RETURN(TRUE);
     }
+    */
     //Check for db level deny
+    printf("Checking DB DENY");
     ulong db_deny = 0;
+    mysql_mutex_lock(&acl_cache->lock);
     for (uint i=0 ; i < acl_dbs.elements ; i++)
     {
       ACL_DB *acl_db=dynamic_element(&acl_dbs,i,ACL_DB*);
-      if (acl_db->db && wild_compare(db,acl_db->db,db_is_pattern))
+      if (!acl_db->db ||  !wild_compare(db,acl_db->db,db_is_pattern))
       {
         db_deny=acl_db->deny;
+        printf("Found ACL DB! Setting db.deny");
         break;
       }
     }
+    mysql_mutex_unlock(&acl_cache->lock);
+    //db_deny = 1;
     if (want_access & db_deny)
     {
+      printf("Denying DB level privilege!!");
       status_var_increment(thd->status_var.access_denied_errors);
       my_error(ER_DBACCESS_DENIED_ERROR, MYF(0),
                sctx->priv_user, sctx->priv_host,
