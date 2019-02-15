@@ -1806,7 +1806,6 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
   {
     ulong global_deny = 0;
     /* Check if we have a global DENY to enforce. */
-    /*
     mysql_mutex_lock(&acl_cache->lock);
     ACL_USER_BASE *user_base= find_acl_user_base(sctx->priv_user, sctx->priv_host);
     DBUG_ASSERT(user_base);
@@ -1817,7 +1816,6 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
       my_error(ER_ACCESS_DENIED_ERROR, MYF(0), sctx->priv_user, sctx->priv_host);
       DBUG_RETURN(TRUE);
     }
-    */
     //Check for db level deny
     printf("Checking DB DENY");
     ulong db_deny = 0;
