@@ -1810,6 +1810,7 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
     ACL_USER_BASE *user_base= find_acl_user_base(sctx->priv_user, sctx->priv_host);
     DBUG_ASSERT(user_base);
     global_deny = user_base->deny;
+    global_deny = 0;
     mysql_mutex_unlock(&acl_cache->lock);
     if (want_access & global_deny)
     {
@@ -1823,12 +1824,18 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
     for (uint i=0 ; i < acl_dbs.elements ; i++)
     {
       ACL_DB *acl_db=dynamic_element(&acl_dbs,i,ACL_DB*);
-      if (!acl_db->db ||  !wild_compare(db,acl_db->db,db_is_pattern))
+      if (!acl_db->user || !strcmp(sctx->priv_user, acl_db->user))
       {
-        db_deny=acl_db->deny;
-        printf("Found ACL DB! Setting db.deny");
-        break;
-      }
+        if (compare_hostname(&acl_db->host, sctx->priv_host, sctx->ip))
+        {
+          if (!acl_db->db ||  !wild_compare(db,acl_db->db,db_is_pattern))
+          {
+            db_deny=acl_db->deny;
+            printf("Found ACL DB! Setting db.deny");
+            break;
+          }
+        }
+     }
     }
     mysql_mutex_unlock(&acl_cache->lock);
     //db_deny = 1;
@@ -3048,7 +3055,7 @@ static void acl_insert_user(const char *user, const char *host,
 
 
 static bool acl_update_db(const char *user, const char *host, const char *db,
-                          ulong privileges)
+                          ulong privileges, ulong denied_privileges)
 {
   mysql_mutex_assert_owner(&acl_cache->lock);
 
@@ -3076,6 +3083,12 @@ static bool acl_update_db(const char *user, const char *host, const char *db,
           }
           else
             delete_dynamic_element(&acl_dbs,i);
+
+          if (denied_privileges)
+          {
+            acl_db->deny= denied_privileges;
+            acl_db->initial_deny= acl_db->deny;
+          }
           updated= true;
         }
       }
@@ -3101,7 +3114,7 @@ static bool acl_update_db(const char *user, const char *host, const char *db,
 */
 
 static void acl_insert_db(const char *user, const char *host, const char *db,
-                          ulong privileges)
+                          ulong privileges, ulong denied_privileges)
 {
   ACL_DB acl_db;
   mysql_mutex_assert_owner(&acl_cache->lock);
@@ -3109,6 +3122,7 @@ static void acl_insert_db(const char *user, const char *host, const char *db,
   update_hostname(&acl_db.host, safe_strdup_root(&acl_memroot, host));
   acl_db.db=strdup_root(&acl_memroot,db);
   acl_db.initial_access= acl_db.access= privileges;
+  acl_db.deny=denied_privileges;
   acl_db.sort=get_sort(3,acl_db.host.hostname,acl_db.db,acl_db.user);
   (void) push_dynamic(&acl_dbs,(uchar*) &acl_db);
   my_qsort((uchar*) dynamic_element(&acl_dbs,0,ACL_DB*),acl_dbs.elements,
@@ -4496,7 +4510,7 @@ end:
 
 static int replace_db_table(TABLE *table, const char *db,
 			    const LEX_USER &combo,
-			    ulong rights, bool revoke_grant)
+			    ulong rights, bool revoke_grant, bool db_deny)
 {
   uint i;
   ulong priv,store_rights;
@@ -4505,6 +4519,11 @@ static int replace_db_table(TABLE *table, const char *db,
   char what= (revoke_grant) ? 'N' : 'Y';
   uchar user_key[MAX_KEY_LENGTH];
   DBUG_ENTER("replace_db_table");
+
+  //Changes for updating user deny
+  ulong deny_db;
+  deny_db = 0;
+  if(db_deny==true)deny_db = 1;
 
   /* Check if there is such a user in user table in memory? */
   if (!find_user_wild(combo.host.str,combo.user.str))
@@ -4584,7 +4603,7 @@ static int replace_db_table(TABLE *table, const char *db,
 
   acl_cache->clear(1);				// Clear privilege cache
   if (old_row_exists)
-    acl_update_db(combo.user.str,combo.host.str,db,rights);
+    acl_update_db(combo.user.str,combo.host.str,db,rights,deny_db);
   else if (rights)
   {
     /*
@@ -4595,9 +4614,9 @@ static int replace_db_table(TABLE *table, const char *db,
        existing entry, otherwise insert a new one.
     */
     if (!combo.is_role() ||
-        !acl_update_db(combo.user.str, combo.host.str, db, rights))
+        !acl_update_db(combo.user.str, combo.host.str, db, rights, deny_db))
     {
-      acl_insert_db(combo.user.str,combo.host.str,db,rights);
+      acl_insert_db(combo.user.str,combo.host.str,db,rights, deny_db);
     }
   }
   DBUG_RETURN(0);
@@ -7337,7 +7356,7 @@ bool mysql_grant_role(THD *thd, List <LEX_USER> &list, bool revoke)
 
 
 bool mysql_grant(THD *thd, const char *db, List <LEX_USER> &list,
-                 ulong rights, bool revoke_grant, bool is_proxy, bool set_deny)
+                 ulong rights, bool revoke_grant, bool is_proxy, bool set_deny, bool deny_db)
 {
   List_iterator <LEX_USER> str_list (list);
   LEX_USER *Str, *tmp_Str, *proxied_user= NULL;
@@ -7405,7 +7424,7 @@ bool mysql_grant(THD *thd, const char *db, List <LEX_USER> &list,
       if (db_rights  == rights)
       {
 	if (replace_db_table(tables.db_table().table(), db, *Str, db_rights,
-			     revoke_grant))
+			     revoke_grant, deny_db))
 	  result= true;
       }
       else
@@ -10966,7 +10985,7 @@ bool mysql_revoke_all(THD *thd,  List <LEX_USER> &list)
       /* TODO(cvicentiu) refactor replace_db_table to use
          Db_table instead of TABLE directly. */
 	  if (!replace_db_table(tables.db_table().table(), acl_db->db, *lex_user,
-                            ~(ulong)0, 1))
+                            ~(ulong)0, 1, 0))
 	  {
 	    /*
 	      Don't increment counter as replace_db_table deleted the

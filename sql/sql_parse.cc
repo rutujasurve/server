@@ -3297,7 +3297,7 @@ LEX  *lex, int res, SELECT_LEX *select_lex, TABLE_LIST *first_table)
         /* Conditionally writes to binlog */
         res= mysql_grant(thd, select_lex->db.str, lex->users_list, lex->grant,
                          lex->sql_command == SQLCOM_REVOKE,
-                         lex->type == TYPE_ENUM_PROXY, deny_user);
+                         lex->type == TYPE_ENUM_PROXY, deny_user, deny_user);
       }
       if (!res)
       {
