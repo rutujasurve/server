@@ -6094,7 +6094,7 @@ static int db_name_sort(ACL_DB * const *db1, ACL_DB * const *db2)
           4 - ACL_DB was deleted
 */
 static int update_role_db(ACL_DB *merged, ACL_DB **first, ulong access,
-                          const char *role)
+                          ulong denied_privileges, const char *role)
 {
   if (!first)
     return 0;
@@ -6119,6 +6119,8 @@ static int update_role_db(ACL_DB *merged, ACL_DB **first, ulong access,
     acl_db.db= first[0]->db;
     acl_db.access= access;
     acl_db.initial_access= 0;
+    acl_db.deny= denied_privileges;
+    acl_db.initial_deny= 0;
     acl_db.sort=get_sort(3, "", acl_db.db, role);
     push_dynamic(&acl_dbs,(uchar*) &acl_db);
     return 2;
@@ -6185,22 +6187,27 @@ static bool merge_role_db_privileges(ACL_ROLE *grantee, const char *dbname,
     is not necessarily the first and may be not present at all.
   */
   ACL_DB **first= NULL, *merged= NULL;
-  ulong access= 0, update_flags= 0;
+  ulong access= 0, deny= 0, update_flags= 0;
   for (ACL_DB **cur= dbs.front(); cur <= dbs.back(); cur++)
   {
     if (!first || (!dbname && strcmp(cur[0]->db, cur[-1]->db)))
     { // new db name series
-      update_flags|= update_role_db(merged, first, access, grantee->user.str);
+      update_flags|= update_role_db(merged, first, access, deny, grantee->user.str);
       merged= NULL;
       access= 0;
+      deny= 0;
       first= cur;
     }
-    if (strcmp(cur[0]->user, grantee->user.str) == 0)
+    if (strcmp(cur[0]->user, grantee->user.str) == 0){
       access|= (merged= cur[0])->initial_access;
-    else
+      deny|= (merged= cur[0])->initial_deny;
+    }
+    else{
       access|= cur[0]->access;
+      deny|= cur[0]->deny;
+    }
   }
-  update_flags|= update_role_db(merged, first, access, grantee->user.str);
+  update_flags|= update_role_db(merged, first, access, deny, grantee->user.str);
 
   /*
     to make this code a bit simpler, we sort on deletes, to move
