@@ -5,26 +5,28 @@ CREATE TABLE test_database.t1 (a int);
 INSERT INTO test_database.t1 values (1), (2), (3);
 GRANT ALL ON test_database.* TO foo;
 GRANT ALL ON test_database.* TO bar;
---change_user foo
-# This command should return both rows of t1.
 select * from test_database.t1;
---change_user root
+a
+1
+2
+3
 DENY SELECT ON test_database.* TO foo;
---change_user foo
-# The command should now fail with permission denied.
---error ER_DBACCESS_DENIED_ERROR
 SHOW TABLES FROM test_database;
---error ER_DBACCESS_DENIED_ERROR
+ERROR 42000: Access denied for user 'foo'@'%' to database 'test_database'
 select * from test_database.t1;
---change_user bar
+ERROR 42000: Access denied for user 'foo'@'%' to database 'test_database'
 select * from test_database.t1;
---change_user root
+a
+1
+2
+3
 CREATE TABLE test.t1 (a int);
 INSERT INTO test.t1 values (1), (2);
 GRANT ALL ON test.* to foo;
---change_user foo
 select * from test.t1;
---change_user root
+a
+1
+2
 drop user foo;
 drop user bar;
 drop database test_database;

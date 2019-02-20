@@ -1818,7 +1818,6 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
       DBUG_RETURN(TRUE);
     }
     //Check for db level deny
-    printf("Checking DB DENY");
     ulong db_deny = 0;
     mysql_mutex_lock(&acl_cache->lock);
     for (uint i=0 ; i < acl_dbs.elements ; i++)
@@ -1828,20 +1827,17 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
       {
         if (compare_hostname(&acl_db->host, sctx->priv_host, sctx->ip))
         {
-          if (!acl_db->db ||  !wild_compare(db,acl_db->db,db_is_pattern))
+          if (!acl_db->db ||  !strcmp(db,acl_db->db))
           {
             db_deny=acl_db->deny;
-            printf("Found ACL DB! Setting db.deny");
             break;
           }
         }
      }
     }
     mysql_mutex_unlock(&acl_cache->lock);
-    //db_deny = 1;
     if (want_access & db_deny)
     {
-      printf("Denying DB level privilege!!");
       status_var_increment(thd->status_var.access_denied_errors);
       my_error(ER_DBACCESS_DENIED_ERROR, MYF(0),
                sctx->priv_user, sctx->priv_host,
