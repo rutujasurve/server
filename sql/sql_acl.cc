@@ -3051,7 +3051,7 @@ static void acl_insert_user(const char *user, const char *host,
 
 
 static bool acl_update_db(const char *user, const char *host, const char *db,
-                          ulong privileges, ulong denied_privileges)
+                          ulong privileges, bool update_deny)
 {
   mysql_mutex_assert_owner(&acl_cache->lock);
 
@@ -3072,19 +3072,19 @@ static bool acl_update_db(const char *user, const char *host, const char *db,
             (acl_db->db && !strcmp(db,acl_db->db)))
 
         {
-          if (privileges)
+          if (!update_deny)
           {
             acl_db->access= privileges;
             acl_db->initial_access= acl_db->access;
           }
+            //delete_dynamic_element(&acl_dbs,i);
           else
-            delete_dynamic_element(&acl_dbs,i);
-
-          if (denied_privileges)
           {
-            acl_db->deny= denied_privileges;
+            acl_db->deny= privileges;
             acl_db->initial_deny= acl_db->deny;
           }
+          if (acl_db->access == 0 && acl_db->deny == 0)
+            delete_dynamic_element(&acl_dbs,i);
           updated= true;
         }
       }
@@ -3110,15 +3110,21 @@ static bool acl_update_db(const char *user, const char *host, const char *db,
 */
 
 static void acl_insert_db(const char *user, const char *host, const char *db,
-                          ulong privileges, ulong denied_privileges)
+                          ulong privileges, bool add_deny)
 {
   ACL_DB acl_db;
   mysql_mutex_assert_owner(&acl_cache->lock);
   acl_db.user=strdup_root(&acl_memroot,user);
   update_hostname(&acl_db.host, safe_strdup_root(&acl_memroot, host));
   acl_db.db=strdup_root(&acl_memroot,db);
-  acl_db.initial_access= acl_db.access= privileges;
-  acl_db.deny=denied_privileges;
+  acl_db.initial_access= 0;
+  acl_db.access=0;
+  acl_db.initial_deny= 0;
+  acl_db.deny= 0;
+  if(add_deny)
+    acl_db.initial_deny= acl_db.deny=privileges;
+  else
+    acl_db.initial_access= acl_db.access= privileges;
   acl_db.sort=get_sort(3,acl_db.host.hostname,acl_db.db,acl_db.user);
   (void) push_dynamic(&acl_dbs,(uchar*) &acl_db);
   my_qsort((uchar*) dynamic_element(&acl_dbs,0,ACL_DB*),acl_dbs.elements,
@@ -3136,7 +3142,7 @@ static void acl_insert_db(const char *user, const char *host, const char *db,
 ulong acl_get(const char *host, const char *ip,
               const char *user, const char *db, my_bool db_is_pattern)
 {
-  ulong host_access= ~(ulong)0, db_access= 0;
+  ulong host_access= ~(ulong)0, db_access= 0, db_deny= 0;
   uint i;
   size_t key_length;
   char key[ACL_KEY_LENGTH],*tmp_db,*end;
@@ -3178,6 +3184,7 @@ ulong acl_get(const char *host, const char *ip,
         if (!acl_db->db || !wild_compare(db,acl_db->db,db_is_pattern))
         {
           db_access=acl_db->access;
+          db_deny=acl_db->deny;
           if (acl_db->host.hostname)
             goto exit;                          // Fully specified. Take it
           /* the host table is not used for roles */
@@ -3212,14 +3219,14 @@ exit:
   if (!db_is_pattern &&
       (entry= (acl_entry*) malloc(sizeof(acl_entry)+key_length)))
   {
-    entry->access=(db_access & host_access);
+    entry->access=(db_access & host_access & ~db_deny);
     DBUG_ASSERT(key_length < 0xffff);
     entry->length=(uint16)key_length;
     memcpy((uchar*) entry->key,key,key_length);
     acl_cache->add(entry);
   }
   mysql_mutex_unlock(&acl_cache->lock);
-  DBUG_PRINT("exit", ("access: 0x%lx", db_access & host_access));
+  DBUG_PRINT("exit", ("access: 0x%lx", db_access & host_access & ~db_deny));
   DBUG_RETURN(db_access & host_access);
 }
 
@@ -4516,11 +4523,6 @@ static int replace_db_table(TABLE *table, const char *db,
   uchar user_key[MAX_KEY_LENGTH];
   DBUG_ENTER("replace_db_table");
 
-  //Changes for updating user deny
-  ulong deny_db;
-  deny_db = 0;
-  if(db_deny==true)deny_db = 1;
-
   /* Check if there is such a user in user table in memory? */
   if (!find_user_wild(combo.host.str,combo.user.str))
   {
@@ -4599,7 +4601,7 @@ static int replace_db_table(TABLE *table, const char *db,
 
   acl_cache->clear(1);				// Clear privilege cache
   if (old_row_exists)
-    acl_update_db(combo.user.str,combo.host.str,db,rights,deny_db);
+    acl_update_db(combo.user.str,combo.host.str,db,rights,db_deny);
   else if (rights)
   {
     /*
@@ -4610,9 +4612,9 @@ static int replace_db_table(TABLE *table, const char *db,
        existing entry, otherwise insert a new one.
     */
     if (!combo.is_role() ||
-        !acl_update_db(combo.user.str, combo.host.str, db, rights, deny_db))
+        !acl_update_db(combo.user.str, combo.host.str, db, rights, db_deny))
     {
-      acl_insert_db(combo.user.str,combo.host.str,db,rights, deny_db);
+      acl_insert_db(combo.user.str,combo.host.str,db,rights, db_deny);
     }
   }
   DBUG_RETURN(0);
