@@ -4522,6 +4522,7 @@ static int replace_db_table(TABLE *table, const char *db,
   char what= (revoke_grant) ? 'N' : 'Y';
   uchar user_key[MAX_KEY_LENGTH];
   DBUG_ENTER("replace_db_table");
+  ulong existing_deny = 0;
 
   /* Check if there is such a user in user table in memory? */
   if (!find_user_wild(combo.host.str,combo.user.str))
@@ -4564,17 +4565,35 @@ static int replace_db_table(TABLE *table, const char *db,
   else
   {
     old_row_exists = 1;
+    existing_deny = (table->field[table->s->fields - 1 ])->val_int();
     store_record(table,record[1]);
   }
 
+  //find if revoke deny or deny
   store_rights=get_rights_for_db(rights);
-  for (i= 3, priv= 1; i < table->s->fields; i++, priv <<= 1)
-  {
-    if (priv & store_rights)			// do it if priv is chosen
-      table->field [i]->store(&what,1, &my_charset_latin1);// set requested privileges
+  if(db_deny == false){
+    for (i= 3, priv= 1; i < table->s->fields - 1; i++, priv <<= 1)
+    {
+      if (priv & store_rights)			// do it if priv is chosen
+        table->field [i]->store(&what,1, &my_charset_latin1);// set requested privileges
+    }
+    rights=get_access(table,3);
+    rights=fix_rights_for_db(rights);
   }
-  rights=get_access(table,3);
-  rights=fix_rights_for_db(rights);
+  else
+  {
+    ulong store_deny = 0;
+    if(revoke_grant){
+      store_deny = ~store_rights & existing_deny;
+    }
+    else
+    {
+      store_deny = store_rights | existing_deny;
+    }
+    rights = store_deny;
+
+    ulong try_deny = table->field[table->s->fields - 1]->store(rights);
+ }
 
   if (old_row_exists)
   {

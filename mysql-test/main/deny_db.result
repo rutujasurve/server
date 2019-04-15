@@ -1,33 +1,59 @@
-CREATE DATABASE test_database;
+CREATE DATABASE db_for_test;
 CREATE USER foo;
 CREATE USER bar;
-CREATE TABLE test_database.t1 (a int);
-INSERT INTO test_database.t1 values (1), (2), (3);
-GRANT ALL ON test_database.* TO foo;
-GRANT ALL ON test_database.* TO bar;
-select * from test_database.t1;
+CREATE TABLE db_for_test.t1 (a int);
+INSERT INTO db_for_test.t1 values (1), (2), (3);
+GRANT ALL ON db_for_test.* TO foo;
+GRANT ALL ON db_for_test.* TO bar;
+select * from db_for_test.t1;
 a
 1
 2
 3
-DENY SELECT ON test_database.* TO foo;
-SHOW TABLES FROM test_database;
-ERROR 42000: Access denied for user 'foo'@'%' to database 'test_database'
-select * from test_database.t1;
-ERROR 42000: Access denied for user 'foo'@'%' to database 'test_database'
-select * from test_database.t1;
+select user, host, db, select_priv, denied_priv from mysql.db;
+user	host	db	select_priv	denied_priv
+	%	test	Y	
+	%	test\_%	Y	
+foo	%	db_for_test	Y	
+bar	%	db_for_test	Y	
+DENY SELECT ON db_for_test.* TO foo;
+select user, host, db, select_priv, denied_priv from mysql.db;
+user	host	db	select_priv	denied_priv
+	%	test	Y	
+	%	test\_%	Y	
+foo	%	db_for_test	Y	Select
+bar	%	db_for_test	Y	
+SHOW TABLES FROM db_for_test;
+ERROR 42000: Access denied for user 'foo'@'%' to database 'db_for_test'
+select * from db_for_test.t1;
+ERROR 42000: Access denied for user 'foo'@'%' to database 'db_for_test'
+select * from db_for_test.t3;
+ERROR 42000: Access denied for user 'foo'@'%' to database 'db_for_test'
+DENY INSERT ON db_for_test.* TO foo;
+select user, host, db, select_priv, denied_priv from mysql.db;
+user	host	db	select_priv	denied_priv
+	%	test	Y	
+	%	test\_%	Y	
+foo	%	db_for_test	Y	Select,Insert
+bar	%	db_for_test	Y	
+INSERT INTO db_for_test.t1 values (5), (6), (7);
+ERROR 42000: Access denied for user 'foo'@'%' to database 'db_for_test'
+SELECT * from db_for_test.t1;
+ERROR 42000: Access denied for user 'foo'@'%' to database 'db_for_test'
+select * from db_for_test.t1;
 a
 1
 2
 3
-CREATE TABLE test.t1 (a int);
-INSERT INTO test.t1 values (1), (2);
-GRANT ALL ON test.* to foo;
-select * from test.t1;
+CREATE DATABASE db_foo;
+CREATE TABLE db_foo.t1 (a int);
+INSERT INTO db_foo.t1 values (1), (2);
+GRANT ALL ON db_foo.* to foo;
+select * from db_foo.t1;
 a
 1
 2
 drop user foo;
 drop user bar;
-drop database test_database;
-drop database test;
+drop database db_foo;
+drop database db_for_test;
