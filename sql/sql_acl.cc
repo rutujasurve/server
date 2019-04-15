@@ -5078,8 +5078,7 @@ GRANT_NAME::GRANT_NAME(TABLE *form, bool is_routine)
   privs = (ulong) form->field[6]->val_int();
   privs = fix_rights_for_table(privs);
   init_privs= privs;
-  //confirm:
-  deny = (ulong) form->field[7]->val_int();
+  deny = (ulong) form->field[8]->val_int();
   deny = fix_rights_for_table(deny);
   init_deny= deny;
 
@@ -5102,7 +5101,7 @@ GRANT_TABLE::GRANT_TABLE(TABLE *form, TABLE *col_privs)
   }
   cols= (ulong) form->field[7]->val_int();
   cols= fix_rights_for_column(cols);
-  deny_cols= (ulong) form->field[8]->val_int();
+  deny_cols= (ulong) form->field[9]->val_int();
   deny_cols= fix_rights_for_column(deny_cols);
   /*
     Initial columns privileges are the same as column privileges on creation.
@@ -5162,7 +5161,7 @@ GRANT_TABLE::GRANT_TABLE(TABLE *form, TABLE *col_privs)
       /* As column name is a string, we don't have to supply a buffer */
       res=col_privs->field[4]->val_str(&column_name);
       ulong priv= (ulong) col_privs->field[6]->val_int();
-      ulong denied_priv= (ulong) col_privs->field[7]->val_int();
+      ulong denied_priv= (ulong) col_privs->field[8]->val_int();
       if (!(mem_check = new GRANT_COLUMN(*res,
                                          fix_rights_for_column(priv), fix_rights_for_column(denied_priv))))
       {
@@ -5452,7 +5451,11 @@ static int replace_column_table(GRANT_TABLE *g_t,
 	grant_column = column_hash_search(g_t,
 					  column_name.ptr(),
 					  column_name.length());
-	if (privileges)
+
+  ulong deny_privilege = (ulong) table->field[8]->val_int();
+  //deny_privilege=fix_rights_for_column(deny_privilege);
+
+	if (privileges | deny_privilege)
 	{
 	  int tmp_error;
 	  if (unlikely(tmp_error=
@@ -5615,6 +5618,7 @@ static int replace_table_table(THD *thd, GRANT_TABLE *grant_table,
       goto table_error;				/* purecov: deadcode */
   }
 
+  //Todo rutuja if (rights | col_rights | denied_rights | denied_col_rights)
   if (rights | col_rights)
   {
     grant_table->init_privs= rights;
