@@ -1,12 +1,44 @@
-CREATE DATABASE test_database;
+CREATE DATABASE g;
 CREATE USER foo;
-CREATE TABLE test_database.t1 (a int);
-INSERT INTO test_database.t1 values (1), (2);
-GRANT ALL ON test_database.* TO foo;
-select * from test_database.t1;
+CREATE USER bar;
+CREATE TABLE g.t1 (a int);
+INSERT INTO g.t1 values (1), (2);
+GRANT SELECT ON g.* TO foo;
+GRANT SELECT ON g.* TO bar;
+select * from g.t1;
 a
 1
 2
 DENY SELECT ON *.* TO foo;
-select * from test_database.t1;
+select * from g.t1;
 ERROR 28000: Access denied for user 'foo'@'%' (using password: (null))
+select * from g.t1;
+a
+1
+2
+GRANT INSERT ON g.* TO foo;
+INSERT INTO g.t1 values (3), (4);
+DENY INSERT ON *.* TO foo;
+select user, host, select_priv, denied_priv from mysql.user;
+user	host	select_priv	denied_priv
+root	localhost	Y	
+root	mariadb-rsurve	Y	
+root	127.0.0.1	Y	
+root	::1	Y	
+bar	%	N	
+foo	%	N	Select,Insert
+INSERT INTO g.t1 values (3), (4);
+ERROR 28000: Access denied for user 'foo'@'%' (using password: (null))
+flush privileges;
+INSERT INTO g.t1 values (3), (4);
+ERROR 28000: Access denied for user 'foo'@'%' (using password: (null))
+select * from g.t1;
+ERROR 28000: Access denied for user 'foo'@'%' (using password: (null))
+select * from g.t1;
+a
+1
+2
+3
+4
+drop user foo;
+drop database g;

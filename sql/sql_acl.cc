@@ -1810,7 +1810,6 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
     ACL_USER_BASE *user_base= find_acl_user_base(sctx->priv_user, sctx->priv_host);
     DBUG_ASSERT(user_base);
     global_deny = user_base->deny;
-    global_deny = 0;
     mysql_mutex_unlock(&acl_cache->lock);
     if (want_access & global_deny)
     {
@@ -1820,20 +1819,22 @@ check_access(THD *thd, ulong want_access, const char *db, ulong *save_priv,
     //Check for db level deny
     ulong db_deny = 0;
     mysql_mutex_lock(&acl_cache->lock);
-    for (uint i=0 ; i < acl_dbs.elements ; i++)
-    {
-      ACL_DB *acl_db=dynamic_element(&acl_dbs,i,ACL_DB*);
-      if (!acl_db->user || !strcmp(sctx->priv_user, acl_db->user))
+    if(db != NULL){
+      for (uint i=0 ; i < acl_dbs.elements ; i++)
       {
-        if (compare_hostname(&acl_db->host, sctx->priv_host, sctx->ip))
+        ACL_DB *acl_db=dynamic_element(&acl_dbs,i,ACL_DB*);
+        if (!acl_db->user || !strcmp(sctx->priv_user, acl_db->user))
         {
-          if (!acl_db->db ||  !strcmp(db,acl_db->db))
+          if (compare_hostname(&acl_db->host, sctx->priv_host, sctx->ip))
           {
-            db_deny=acl_db->deny;
-            break;
+            if (!acl_db->db ||  !strcmp(db,acl_db->db))
+            {
+              db_deny=acl_db->deny;
+              break;
+            }
           }
         }
-     }
+      }
     }
     mysql_mutex_unlock(&acl_cache->lock);
     if (want_access & db_deny)
@@ -2892,12 +2893,14 @@ static uchar* check_get_key(ACL_USER *buff, size_t *length,
 }
 
 
-static void acl_update_role(const char *rolename, ulong privileges, ulong denied_privileges)
+static void acl_update_role(const char *rolename, ulong privileges, bool set_deny)
 {
   ACL_ROLE *role= find_acl_role(rolename);
   if (role){
+    if(set_deny)
+      role->initial_role_deny= role->deny = privileges;
+    else
     role->initial_role_access= role->access= privileges;
-    role->initial_role_deny= role->deny = denied_privileges;
   }
 }
 
@@ -2909,7 +2912,7 @@ static void acl_update_user(const char *user, const char *host,
 			    const char *x509_subject,
 			    USER_RESOURCES  *mqh,
 			    ulong privileges,
-                            ulong denied_privileges,
+                            bool set_deny,
 			    const LEX_CSTRING *plugin,
 			    const LEX_CSTRING *auth)
 {
@@ -2937,8 +2940,11 @@ static void acl_update_user(const char *user, const char *host,
           set_user_salt(acl_user, password, password_len);
           set_user_plugin(acl_user, password_len);
         }
-      acl_user->access=privileges;
-      acl_user->deny=denied_privileges;
+
+      if(set_deny)
+        acl_user->deny=privileges;
+      else
+        acl_user->access=privileges;
       if (mqh->specified_limits & USER_RESOURCES::QUERIES_PER_HOUR)
         acl_user->user_resource.questions=mqh->questions;
       if (mqh->specified_limits & USER_RESOURCES::UPDATES_PER_HOUR)
@@ -2966,12 +2972,16 @@ static void acl_update_user(const char *user, const char *host,
 }
 
 
-static void acl_insert_role(const char *rolename, ulong privileges, ulong denied_privileges)
+static void acl_insert_role(const char *rolename, ulong privileges, bool set_deny)
 {
   ACL_ROLE *entry;
+  ulong priv = 0;
+  ulong denied_privileges = 0;
+  if(set_deny)denied_privileges =privileges;
+  else priv =privileges;
 
   mysql_mutex_assert_owner(&acl_cache->lock);
-  entry= new (&acl_memroot) ACL_ROLE(rolename, privileges, denied_privileges, &acl_memroot);
+  entry= new (&acl_memroot) ACL_ROLE(rolename, priv, denied_privileges, &acl_memroot);
   (void) my_init_dynamic_array(&entry->parent_grantee,
                                sizeof(ACL_USER_BASE *), 8, 8, MYF(0));
   (void) my_init_dynamic_array(&entry->role_grants,sizeof(ACL_ROLE *),
@@ -2989,7 +2999,7 @@ static void acl_insert_user(const char *user, const char *host,
 			    const char *x509_subject,
 			    USER_RESOURCES *mqh,
 			    ulong privileges,
-                            ulong denied_privileges,
+                            bool set_deny,
 			    const LEX_CSTRING *plugin,
 			    const LEX_CSTRING *auth)
 {
@@ -3019,8 +3029,14 @@ static void acl_insert_user(const char *user, const char *host,
   }
 
   acl_user.flags= 0;
-  acl_user.access=privileges;
-  acl_user.deny=denied_privileges;
+  if(set_deny){
+    acl_user.deny=privileges;
+    acl_user.initial_deny=privileges;
+  }
+  else
+  {
+    acl_user.access=privileges;
+  }
   acl_user.user_resource = *mqh;
   acl_user.sort=get_sort(2, acl_user.host.hostname, acl_user.user.str);
   acl_user.hostname_length=(uint) strlen(host);
@@ -4204,6 +4220,8 @@ static int replace_user_table(THD *thd, const User_table &user_table,
   LEX *lex= thd->lex;
   TABLE *table= user_table.table();
   DBUG_ENTER("replace_user_table");
+  ulong existing_deny = 0;
+  ulong store_deny_priv = 0;
 
   mysql_mutex_assert_owner(&acl_cache->lock);
 
@@ -4290,6 +4308,7 @@ static int replace_user_table(THD *thd, const User_table &user_table,
   {
     old_row_exists = 1;
     store_record(table,record[1]);			// Save copy for update
+    existing_deny = user_table.denied_priv()->val_int();
   }
 
   if (!old_row_exists || combo.pwtext.length || combo.pwhash.length)
@@ -4300,18 +4319,24 @@ static int replace_user_table(THD *thd, const User_table &user_table,
 
   ulong priv;
   priv = SELECT_ACL;
-  for (uint i= 0; i < user_table.num_privileges(); i++, priv <<= 1)
-  {
-    if (priv & rights)
-      user_table.priv_field(i)->store(&what, 1, &my_charset_latin1);
+  if(!set_deny){
+    for (uint i= 0; i < user_table.num_privileges(); i++, priv <<= 1)
+    {
+      if (priv & rights)
+        user_table.priv_field(i)->store(&what, 1, &my_charset_latin1);
+    }
+    rights= user_table.get_access();
   }
-
-  rights= user_table.get_access();
-
-  //Changes for updating user deny
-  ulong deny_user;
-  deny_user = 0;
-  if(set_deny==true)deny_user = 1;
+//else use existing_deny
+  else
+  {
+    if(~revoke_grant)
+      store_deny_priv = rights | existing_deny;
+    else
+      store_deny_priv = ~rights & existing_deny;
+    rights = store_deny_priv;
+    user_table.denied_priv()->store(rights);
+  }
  
   DBUG_PRINT("info",("table fields: %d", user_table.num_fields()));
   /* If we don't have a password column, we'll use the authentication_string
@@ -4471,7 +4496,7 @@ end:
     if (old_row_exists)
     {
       if (handle_as_role)
-        acl_update_role(combo.user.str, rights, deny_user);
+        acl_update_role(combo.user.str, rights, set_deny);
       else
         acl_update_user(combo.user.str, combo.host.str,
                         combo.pwhash.str, combo.pwhash.length,
@@ -4481,14 +4506,14 @@ end:
                         lex->x509_subject,
                         &lex->mqh,
                         rights,
-                        deny_user,
+                        set_deny,
                         &combo.plugin,
                         &combo.auth);
     }
     else
     {
       if (handle_as_role)
-        acl_insert_role(combo.user.str, rights, deny_user);
+        acl_insert_role(combo.user.str, rights, set_deny);
       else
         acl_insert_user(combo.user.str, combo.host.str,
                         combo.pwhash.str, combo.pwhash.length,
@@ -4498,7 +4523,7 @@ end:
                         lex->x509_subject,
                         &lex->mqh,
                         rights,
-                        deny_user,
+                        set_deny,
                         &combo.plugin,
                         &combo.auth);
     }

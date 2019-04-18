@@ -40,6 +40,11 @@ INSERT INTO db_for_test.t1 values (5), (6), (7);
 ERROR 42000: Access denied for user 'foo'@'%' to database 'db_for_test'
 SELECT * from db_for_test.t1;
 ERROR 42000: Access denied for user 'foo'@'%' to database 'db_for_test'
+flush privileges;
+SELECT * from db_for_test.t1;
+ERROR 42000: Access denied for user 'foo'@'%' to database 'db_for_test'
+INSERT INTO db_for_test.t1 values (5), (6), (7);
+ERROR 42000: Access denied for user 'foo'@'%' to database 'db_for_test'
 select * from db_for_test.t1;
 a
 1

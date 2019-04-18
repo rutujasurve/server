@@ -28,6 +28,13 @@ select user, host, db, select_priv, denied_priv from mysql.db;
 INSERT INTO db_for_test.t1 values (5), (6), (7);
 --error ER_DBACCESS_DENIED_ERROR
 SELECT * from db_for_test.t1;
+--change_user root
+flush privileges;
+--change_user foo
+--error ER_DBACCESS_DENIED_ERROR
+SELECT * from db_for_test.t1;
+--error ER_DBACCESS_DENIED_ERROR
+INSERT INTO db_for_test.t1 values (5), (6), (7);
 --change_user bar
 select * from db_for_test.t1;
 --change_user root
