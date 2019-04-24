@@ -41,4 +41,5 @@ a
 3
 4
 drop user foo;
+drop user bar;
 drop database g;

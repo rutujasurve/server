@@ -4994,7 +4994,7 @@ public:
   ulong deny;
   ulong init_deny;
   GRANT_NAME(const char *h, const char *d,const char *u,
-             const char *t, ulong p, ulong den, bool is_routine);
+             const char *t, ulong p, ulong deny_p, bool is_routine);
   GRANT_NAME (TABLE *form, bool is_routine);
   virtual ~GRANT_NAME() {};
   virtual bool ok() { return privs != 0; }
@@ -5014,7 +5014,7 @@ public:
   ulong init_deny_cols;
 
   GRANT_TABLE(const char *h, const char *d,const char *u,
-              const char *t, ulong p, ulong c, ulong den);
+              const char *t, ulong p, ulong c, ulong deny_p, ulong deny_c);
   GRANT_TABLE (TABLE *form, TABLE *col_privs);
   ~GRANT_TABLE();
   bool ok() { return privs != 0 || cols != 0; }
@@ -5052,15 +5052,15 @@ void GRANT_NAME::set_user_details(const char *h, const char *d,
 }
 
 GRANT_NAME::GRANT_NAME(const char *h, const char *d,const char *u,
-        const char *t, ulong p, ulong den, bool is_routine)
-  :db(0), tname(0), privs(p), init_privs(p), deny(den), init_deny(den)
+        const char *t, ulong p, ulong deny_p, bool is_routine)
+  :db(0), tname(0), privs(p), init_privs(p), deny(deny_p), init_deny(deny_p)
 {
   set_user_details(h, d, u, t, is_routine);
 }
 
 GRANT_TABLE::GRANT_TABLE(const char *h, const char *d,const char *u,
-                	 const char *t, ulong p, ulong c, ulong den)
-  :GRANT_NAME(h,d,u,t,p,den, FALSE), cols(c), deny_cols(den)
+        const char *t, ulong p, ulong c, ulong deny_p, ulong deny_c)
+  :GRANT_NAME(h,d,u,t,p,deny_p, FALSE), cols(c), deny_cols(deny_c)
 {
   init_hash();
 }
@@ -5314,7 +5314,7 @@ static int replace_column_table(GRANT_TABLE *g_t,
 				TABLE *table, const LEX_USER &combo,
 				List <LEX_COLUMN> &columns,
 				const char *db, const char *table_name,
-				ulong rights, ulong denied_rights, bool revoke_grant)
+				ulong rights, bool denied, bool revoke_grant)
 {
   int result=0;
   uchar key[MAX_KEY_LENGTH];
@@ -5352,9 +5352,16 @@ static int replace_column_table(GRANT_TABLE *g_t,
 
   while ((column= iter++))
   {
-    ulong privileges= column->rights;
-    //confirm ToDo rutuja: should add denied_rights to LEX_COLUMN
-    //ulong denied_privileges= column->denied_rights;
+    ulong privileges= 0;
+    if(!denied){
+      privileges= column->rights;
+    }
+    else
+    {
+      //privileges= column->denied_rights;
+      //Confirm with Vicentiu
+      privileges= column->rights;
+    }
     bool old_row_exists=0;
     uchar user_key[MAX_KEY_LENGTH];
 
@@ -5386,7 +5393,15 @@ static int replace_column_table(GRANT_TABLE *g_t,
     }
     else
     {
-      ulong tmp= (ulong) table->field[6]->val_int();
+      ulong tmp= 0;
+      if(!denied)
+      {
+        tmp= (ulong) table->field[6]->val_int();
+      }
+      else
+      {
+        tmp= (ulong) table->field[8]->val_int();
+      }
       tmp=fix_rights_for_column(tmp);
 
       if (revoke_grant)
@@ -5397,8 +5412,14 @@ static int replace_column_table(GRANT_TABLE *g_t,
       store_record(table,record[1]);			// copy original row
     }
 
-    table->field[6]->store((longlong) get_rights_for_column(privileges), TRUE);
-    //ToDo rutuja: confirm: change here: table->field[7]->store((longlong) get_rights_for_column(denied_privileges), TRUE);
+    if(!denied)
+    {
+      table->field[6]->store((longlong) get_rights_for_column(privileges), TRUE);
+    }
+    else
+    {
+      table->field[8]->store((longlong) get_rights_for_column(privileges), TRUE);
+    }
 
     if (old_row_exists)
     {
@@ -5429,8 +5450,14 @@ static int replace_column_table(GRANT_TABLE *g_t,
 	result= -1;				/* purecov: inspected */
 	goto end;				/* purecov: inspected */
       }
-      //Confirm: ToDo rutuja: pass deined_privileges or denied_rights
-      grant_column= new GRANT_COLUMN(column->column,privileges,denied_rights);
+      if(!denied){
+        grant_column= new GRANT_COLUMN(column->column, privileges, (ulong)0);
+      }
+      else
+      {
+        grant_column= new GRANT_COLUMN(column->column, (ulong)0, privileges);
+      }
+      
       if (my_hash_insert(&g_t->hash_columns,(uchar*) grant_column))
       {
         result= -1;
@@ -5458,7 +5485,14 @@ static int replace_column_table(GRANT_TABLE *g_t,
     /* Scan through all rows with the same host,db,user and table */
     do
     {
-      ulong privileges = (ulong) table->field[6]->val_int();
+      ulong privileges = 0;
+      if(!denied){
+        privileges= (ulong) table->field[6]->val_int();
+      }
+      else
+      {
+        privileges= (ulong) table->field[8]->val_int();
+      }
       privileges=fix_rights_for_column(privileges);
       store_record(table,record[1]);
 
@@ -5470,17 +5504,22 @@ static int replace_column_table(GRANT_TABLE *g_t,
                            system_charset_info);
 
 	privileges&= ~rights;
-	table->field[6]->store((longlong)
+  if(!denied)
+  {
+	  table->field[6]->store((longlong)
 			       get_rights_for_column(privileges), TRUE);
+  }
+  else
+  {
+    table->field[8]->store((longlong)
+             get_rights_for_column(privileges), TRUE);
+  }
 	table->field[4]->val_str(&column_name);
 	grant_column = column_hash_search(g_t,
 					  column_name.ptr(),
 					  column_name.length());
 
-  ulong deny_privilege = (ulong) table->field[8]->val_int();
-  //deny_privilege=fix_rights_for_column(deny_privilege);
-
-	if (privileges | deny_privilege)
+  if (privileges)
 	{
 	  int tmp_error;
 	  if (unlikely(tmp_error=
@@ -5493,10 +5532,18 @@ static int replace_column_table(GRANT_TABLE *g_t,
 	    goto end;				/* purecov: deadcode */
 	  }
 	  if (grant_column)
-          {
-            grant_column->rights  = privileges; // Update hash
-            grant_column->init_rights = privileges;
-          }
+    {
+      if(!denied)
+      {
+        grant_column->rights = privileges; // Update hash
+        grant_column->init_rights = privileges;
+      }
+      else
+      {
+        grant_column->denied_rights  = privileges; // Update hash
+        grant_column->init_denied_rights = privileges;
+      }
+    }
 	}
 	else
 	{
@@ -5539,8 +5586,7 @@ static inline void get_grantor(THD *thd, char *grantor)
 static int replace_table_table(THD *thd, GRANT_TABLE *grant_table,
 			       TABLE *table, const LEX_USER &combo,
 			       const char *db, const char *table_name,
-			       ulong rights, ulong col_rights, ulong denied_rights,
-             ulong denied_col_rights, bool revoke_grant)
+			       ulong rights, ulong col_rights, bool denied, bool revoke_grant)
 {
   char grantor[USER_HOST_BUFF_SIZE];
   int old_row_exists = 1;
@@ -5603,8 +5649,15 @@ static int replace_table_table(THD *thd, GRANT_TABLE *grant_table,
   {
     ulong j,k;
     store_record(table,record[1]);
-    j = (ulong) table->field[6]->val_int();
-    k = (ulong) table->field[7]->val_int();
+    if(!denied){
+      j = (ulong) table->field[6]->val_int();
+      k = (ulong) table->field[7]->val_int();
+    }
+    else
+    {
+      j = (ulong) table->field[8]->val_int();
+      k = (ulong) table->field[9]->val_int();
+    }
 
     if (revoke_grant)
     {
@@ -5619,8 +5672,15 @@ static int replace_table_table(THD *thd, GRANT_TABLE *grant_table,
   }
 
   table->field[4]->store(grantor,(uint) strlen(grantor), system_charset_info);
-  table->field[6]->store((longlong) store_table_rights, TRUE);
-  table->field[7]->store((longlong) store_col_rights, TRUE);
+  if(!denied){
+    table->field[6]->store((longlong) store_table_rights, TRUE);
+    table->field[7]->store((longlong) store_col_rights, TRUE);
+  }
+  else
+  {
+    table->field[8]->store((longlong) store_table_rights, TRUE);
+    table->field[9]->store((longlong) store_col_rights, TRUE);
+  }
   rights=fix_rights_for_table(store_table_rights);
   col_rights=fix_rights_for_column(store_col_rights);
 
@@ -5643,20 +5703,23 @@ static int replace_table_table(THD *thd, GRANT_TABLE *grant_table,
       goto table_error;				/* purecov: deadcode */
   }
 
-  //Todo rutuja if (rights | col_rights | denied_rights | denied_col_rights)
   if (rights | col_rights)
   {
-    grant_table->init_privs= rights;
-    grant_table->init_cols=  col_rights;
+    if(!denied){
+      grant_table->init_privs= rights;
+      grant_table->init_cols=  col_rights;
 
-    grant_table->privs= rights;
-    grant_table->cols=	col_rights;
+      grant_table->privs= rights;
+      grant_table->cols=	col_rights;
+    }
+    else
+    {
+      grant_table->init_deny= rights;
+      grant_table->init_deny_cols=  col_rights;
 
-    grant_table->init_deny= denied_rights;
-    grant_table->init_deny_cols=  denied_col_rights;
-
-    grant_table->deny= denied_rights;
-    grant_table->deny_cols=  denied_col_rights;
+      grant_table->deny= rights;
+      grant_table->deny_cols=  col_rights;
+    }
   }
   else
   {
@@ -6417,11 +6480,8 @@ static int update_role_table_columns(GRANT_TABLE *merged,
       roles) we need to create it
     */
     DBUG_ASSERT(privs | cols);
-    /*
-       Passing deny = false
-    */
     merged= new (&grant_memroot) GRANT_TABLE("", first[0]->db, role, first[0]->tname,
-                                     privs, cols, false);
+                                     privs, cols, (ulong)0, (ulong)0);
     merged->init_privs= merged->init_cols= 0;
     update_role_columns(merged, first, last);
     my_hash_insert(&column_priv_hash,(uchar*) merged);
@@ -6907,18 +6967,19 @@ int mysql_table_grant(THD *thd, TABLE_LIST *table_list,
 	result= TRUE;
 	continue;
       }
-      ulong deny = 0;
-      if(is_denied)
-      {
-        deny=1;
+      if(is_denied){
+        grant_table = new GRANT_TABLE (Str->host.str, db_name,
+				       Str->user.str, table_name,
+				       (ulong) 0, (ulong) 0, rights,
+				       column_priv);
       }
-      /*
-         Passing deny = 1 if is_denied is true
-      */
-      grant_table = new GRANT_TABLE (Str->host.str, db_name,
-				     Str->user.str, table_name,
-				     rights,
-				     column_priv, deny);
+      else
+      {
+        grant_table = new GRANT_TABLE (Str->host.str, db_name,
+               Str->user.str, table_name,
+               rights,
+               column_priv, (ulong) 0, (ulong) 0);
+      }
       if (!grant_table ||
         my_hash_insert(&column_priv_hash,(uchar*) grant_table))
       {
@@ -6966,7 +7027,7 @@ int mysql_table_grant(THD *thd, TABLE_LIST *table_list,
     ulong column_deny = grant_table->deny_cols;
     if (replace_table_table(thd, grant_table, tables.tables_priv_table().table(),
                             *Str, db_name, table_name,
-			    rights, column_priv, column_deny, column_deny, revoke_grant))
+			    rights, column_priv, is_denied, revoke_grant))
     {
       /* Should only happen if table is crashed */
       result= TRUE;			       /* purecov: deadcode */
@@ -6975,11 +7036,8 @@ int mysql_table_grant(THD *thd, TABLE_LIST *table_list,
     {
       /* TODO(cvicentiu) refactor replace_column_table to use Columns_priv_table
          instead of TABLE directly. */
-      /*
-         Passing deny = 0 for replace_column_table
-      */
       if (replace_column_table(grant_table, tables.columns_priv_table().table(),
-                               *Str, columns, db_name, table_name, rights, 0,
+                               *Str, columns, db_name, table_name, rights, is_denied,
                                revoke_grant))
       {
 	result= TRUE;
@@ -11145,7 +11203,7 @@ bool mysql_revoke_all(THD *thd,  List <LEX_USER> &list)
 	  if (replace_table_table(thd, grant_table,
                               tables.tables_priv_table().table(),
                               *lex_user, grant_table->db,
-				  grant_table->tname, ~(ulong)0, 0, 0, 0, 1))
+				  grant_table->tname, ~(ulong)0, 0, false, 1))
 	  {
 	    result= -1;
 	  }
@@ -11165,7 +11223,7 @@ bool mysql_revoke_all(THD *thd,  List <LEX_USER> &list)
 	    if (!replace_column_table(grant_table,
                                       tables.columns_priv_table().table(),
                                       *lex_user, columns, grant_table->db,
-				      grant_table->tname, ~(ulong)0, 0, 1))
+				      grant_table->tname, ~(ulong)0, false, 1))
 	    {
 	      revoked= 1;
 	      continue;

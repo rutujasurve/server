@@ -13,8 +13,8 @@ select * from test_database.t2;
 DENY SELECT ON test_database.t1 TO foo;
 --change_user foo
 # The command should now fail with permission denied.
-#--error ER_TABLEACCESS_DENIED_ERROR
-#select * from test_database.t1;
+--error ER_TABLEACCESS_DENIED_ERROR
+select * from test_database.t1;
 select * from test_database.t2;
 select * from test_database.t3;
 drop user foo;

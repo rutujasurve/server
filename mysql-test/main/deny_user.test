@@ -38,6 +38,7 @@ select * from g.t1;
 select * from g.t1;
 --change_user root
 drop user foo;
+drop user bar;
 drop database g;
 
 
