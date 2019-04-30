@@ -5706,19 +5706,31 @@ static int replace_table_table(THD *thd, GRANT_TABLE *grant_table,
   if (rights | col_rights)
   {
     if(!denied){
-      grant_table->init_privs= rights;
-      grant_table->init_cols=  col_rights;
+      ulong denied_privs = (ulong) table->field[8]->val_int();
+      ulong denied_cols = (ulong) table->field[9]->val_int();
 
-      grant_table->privs= rights;
-      grant_table->cols=	col_rights;
+      if(denied_privs | denied_cols)
+      {
+        grant_table->init_privs= rights;
+        grant_table->init_cols=  col_rights;
+
+        grant_table->privs= rights;
+        grant_table->cols=	col_rights;
+      }
     }
     else
     {
-      grant_table->init_deny= rights;
-      grant_table->init_deny_cols=  col_rights;
+      ulong grant_privs = (ulong) table->field[6]->val_int();
+      ulong grant_cols = (ulong) table->field[7]->val_int();
 
-      grant_table->deny= rights;
-      grant_table->deny_cols=  col_rights;
+      if(grant_privs | grant_cols)
+      {
+        grant_table->init_deny= rights;
+        grant_table->init_deny_cols=  col_rights;
+
+        grant_table->deny= rights;
+        grant_table->deny_cols=  col_rights;
+      }
     }
   }
   else

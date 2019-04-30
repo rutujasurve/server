@@ -1,21 +1,21 @@
-CREATE DATABASE test_database;
+CREATE DATABASE dbfoo;
 CREATE USER foo;
-CREATE TABLE test_database.t1 (a int);
-INSERT INTO test_database.t1 values (1), (2), (3);
-CREATE TABLE test_database.t2 (a int);
-INSERT INTO test_database.t2 values (1), (2), (3);
-GRANT ALL ON test_database.* TO foo;
+CREATE TABLE dbfoo.t1 (a int);
+INSERT INTO dbfoo.t1 values (1), (2), (3);
+CREATE TABLE dbfoo.t2 (a int);
+INSERT INTO dbfoo.t2 values (1), (2), (3);
+GRANT ALL ON dbfoo.* TO foo;
 --change_user foo
 # This command should return both rows of t1.
-select * from test_database.t1;
-select * from test_database.t2;
+select * from dbfoo.t1;
+select * from dbfoo.t2;
 --change_user root
-DENY SELECT ON test_database.t1 TO foo;
+DENY SELECT ON dbfoo.t1 TO foo;
 --change_user foo
 # The command should now fail with permission denied.
 --error ER_TABLEACCESS_DENIED_ERROR
-select * from test_database.t1;
-select * from test_database.t2;
-select * from test_database.t3;
+select * from dbfoo.t1;
+select * from dbfoo.t2;
+select * from dbfoo.t3;
 drop user foo;
-drop database test_database;
+drop database dbfoo;

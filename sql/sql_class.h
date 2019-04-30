@@ -1331,6 +1331,7 @@ public:
   const char *host_or_ip;
   ulong master_access;                 /* Global privileges from mysql.user */
   ulong db_access;                     /* Privileges for current db */
+  bool deny_user;
 
   void init();
   void destroy();
