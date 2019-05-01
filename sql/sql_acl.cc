@@ -8076,6 +8076,12 @@ bool check_grant(THD *thd, ulong want_access, TABLE_LIST *tables,
     if (!want_access)
       continue;                                 // ok
 
+    //Changing value of grant privilege to 0 is flag is true
+    if(thd->security_ctx->deny_user)
+    {
+      t_ref->grant.privilege = 0;
+    }
+
     if (!(~t_ref->grant.privilege & want_access) ||
         t_ref->is_anonymous_derived_table() || t_ref->schema_table)
     {
