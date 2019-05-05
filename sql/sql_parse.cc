@@ -5553,7 +5553,7 @@ end_with_restore_list:
   case SQLCOM_REVOKE:
   case SQLCOM_GRANT:
   {
-    thd->security_ctx->deny_user = false;
+    //thd->security_ctx->deny_user = false;
     bool execute_res = execute_grant_or_deny(thd, false, all_tables, lex, res, select_lex, first_table);
     if(!execute_res) goto error;
     break;
@@ -5569,7 +5569,7 @@ end_with_restore_list:
   }
   case SQLCOM_DENY:
   {
-    thd->security_ctx->deny_user = true;
+    //thd->security_ctx->deny_user = true;
     bool execute_res = execute_grant_or_deny(thd, true, all_tables, lex, res, select_lex, first_table);
     if(!execute_res) goto error;
     break;

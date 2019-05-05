@@ -13901,6 +13901,12 @@ bool acl_authenticate(THD *thd, uint com_change_user_pkt_len)
 #endif
 
     sctx->master_access= acl_user->access;
+    //Set deny for security context
+    if(acl_user->deny)
+      sctx->deny_user = true;
+    else
+      sctx->deny_user= false;
+
     if (acl_user->user.str)
       strmake_buf(sctx->priv_user, acl_user->user.str);
     else
