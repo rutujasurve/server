@@ -3250,6 +3250,7 @@ bool LEX::only_view_structure()
   case SQLCOM_REVOKE_ALL:
   case SQLCOM_REVOKE:
   case SQLCOM_GRANT:
+  case SQLCOM_DENY:
   case SQLCOM_CREATE_VIEW:
     return TRUE;
   default:

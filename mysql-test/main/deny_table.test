@@ -15,7 +15,9 @@ DENY SELECT ON foodatabase.t1 TO foo;
 # The command should now fail with permission denied.
 --error ER_TABLEACCESS_DENIED_ERROR
 select * from foodatabase.t1;
+INSERT INTO foodatabase.t1 values (4);
 select * from foodatabase.t2;
+--error ER_NO_SUCH_TABLE
 select * from foodatabase.t3;
 --change_user root
 drop user foo;

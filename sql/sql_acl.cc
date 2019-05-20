@@ -611,7 +611,7 @@ static MEM_ROOT acl_memroot, grant_memroot;
 static bool initialized=0;
 static bool allow_all_hosts=1;
 static HASH acl_check_hosts, column_priv_hash, proc_priv_hash, func_priv_hash;
-static HASH package_spec_priv_hash, package_body_priv_hash;
+static HASH package_spec_priv_hash, package_body_priv_hash, db_user_hash;
 static DYNAMIC_ARRAY acl_wild_hosts;
 static Hash_filo<acl_entry> *acl_cache;
 static uint grant_version=0; /* Version of priv tables. incremented by acl_load */
@@ -4986,11 +4986,11 @@ class GRANT_NAME :public Sql_alloc
 {
 public:
   acl_host_and_ip host;
-  char *db, *user, *tname, *hash_key;
+  char *db, *user, *tname, *hash_key, *t_hash_key;
   ulong privs;
   ulong init_privs; /* privileges found in physical table */
   ulong sort;
-  size_t key_length;
+  size_t key_length, t_key_length;
   ulong deny;
   ulong init_deny;
   GRANT_NAME(const char *h, const char *d,const char *u,
@@ -5049,6 +5049,10 @@ void GRANT_NAME::set_user_details(const char *h, const char *d,
   key_length= strlen(d) + strlen(u)+ strlen(t)+3;
   hash_key=   (char*) alloc_root(&grant_memroot,key_length);
   strmov(strmov(strmov(hash_key,user)+1,db)+1,tname);
+
+  t_key_length= strlen(d) + strlen(u)+ 3;
+  t_hash_key=   (char*) alloc_root(&grant_memroot,t_key_length);
+  strmov(strmov(t_hash_key,user)+1,db);
 }
 
 GRANT_NAME::GRANT_NAME(const char *h, const char *d,const char *u,
@@ -5100,6 +5104,9 @@ GRANT_NAME::GRANT_NAME(TABLE *form, bool is_routine)
   key_length= (strlen(db) + strlen(user) + strlen(tname) + 3);
   hash_key=   (char*) alloc_root(&grant_memroot, key_length);
   strmov(strmov(strmov(hash_key,user)+1,db)+1,tname);
+  t_key_length= (strlen(db) + strlen(user) + 2);
+  t_hash_key=   (char*) alloc_root(&grant_memroot, t_key_length);
+  strmov(strmov(t_hash_key,user)+1,db);
   privs = (ulong) form->field[6]->val_int();
   privs = fix_rights_for_table(privs);
   init_privs= privs;
@@ -5222,6 +5229,12 @@ static uchar* get_grant_table(GRANT_NAME *buff, size_t *length,
   return (uchar*) buff->hash_key;
 }
 
+static uchar* get_table_search_key(GRANT_NAME *buff, size_t *length,
+           my_bool not_used __attribute__((unused)))
+{
+  *length=buff->t_key_length;
+  return (uchar*) buff->t_hash_key;
+}
 
 static void free_grant_table(GRANT_TABLE *grant_table)
 {
@@ -5400,7 +5413,7 @@ static int replace_column_table(GRANT_TABLE *g_t,
       }
       else
       {
-        tmp= (ulong) table->field[8]->val_int();
+        tmp= (ulong) table->field[7]->val_int();
       }
       tmp=fix_rights_for_column(tmp);
 
@@ -5418,7 +5431,7 @@ static int replace_column_table(GRANT_TABLE *g_t,
     }
     else
     {
-      table->field[8]->store((longlong) get_rights_for_column(privileges), TRUE);
+      table->field[7]->store((longlong) get_rights_for_column(privileges), TRUE);
     }
 
     if (old_row_exists)
@@ -5439,7 +5452,12 @@ static int replace_column_table(GRANT_TABLE *g_t,
       grant_column= column_hash_search(g_t, column->column.ptr(),
                                        column->column.length());
       if (grant_column)				// Should always be true
-	grant_column->rights= privileges;	// Update hash
+      {
+        if(!denied)
+          grant_column->rights= privileges; // Update hash
+        else  grant_column->denied_rights= privileges; // Update hash
+      }
+
     }
     else					// new grant
     {
@@ -5491,7 +5509,7 @@ static int replace_column_table(GRANT_TABLE *g_t,
       }
       else
       {
-        privileges= (ulong) table->field[8]->val_int();
+        privileges= (ulong) table->field[7]->val_int();
       }
       privileges=fix_rights_for_column(privileges);
       store_record(table,record[1]);
@@ -5511,7 +5529,7 @@ static int replace_column_table(GRANT_TABLE *g_t,
   }
   else
   {
-    table->field[8]->store((longlong)
+    table->field[7]->store((longlong)
              get_rights_for_column(privileges), TRUE);
   }
 	table->field[4]->val_str(&column_name);
@@ -6497,6 +6515,7 @@ static int update_role_table_columns(GRANT_TABLE *merged,
     merged->init_privs= merged->init_cols= 0;
     update_role_columns(merged, first, last);
     my_hash_insert(&column_priv_hash,(uchar*) merged);
+    my_hash_insert(&db_user_hash,(uchar*) merged);
     return 2;
   }
   else if ((privs | cols) == 0)
@@ -6510,6 +6529,7 @@ static int update_role_table_columns(GRANT_TABLE *merged,
     DBUG_EXECUTE_IF("role_merge_stats",
                     role_column_merges+= MY_TEST(merged->cols););
     my_hash_delete(&column_priv_hash,(uchar*) merged);
+    my_hash_delete(&db_user_hash,(uchar*) merged);
     return 4;
   }
   else
@@ -6993,7 +7013,8 @@ int mysql_table_grant(THD *thd, TABLE_LIST *table_list,
                column_priv, (ulong) 0, (ulong) 0);
       }
       if (!grant_table ||
-        my_hash_insert(&column_priv_hash,(uchar*) grant_table))
+        my_hash_insert(&column_priv_hash,(uchar*) grant_table) ||
+        my_hash_insert(&db_user_hash,(uchar*) grant_table))
       {
 	result= TRUE;				/* purecov: deadcode */
 	continue;				/* purecov: deadcode */
@@ -7036,7 +7057,7 @@ int mysql_table_grant(THD *thd, TABLE_LIST *table_list,
 
     /* TODO(cvicentiu) refactor replace_table_table to use Tables_priv_table
        instead of TABLE directly. */
-    ulong column_deny = grant_table->deny_cols;
+    //ulong column_deny = grant_table->deny_cols;
     if (replace_table_table(thd, grant_table, tables.tables_priv_table().table(),
                             *Str, db_name, table_name,
 			    rights, column_priv, is_denied, revoke_grant))
@@ -7650,6 +7671,7 @@ void  grant_free(void)
 {
   DBUG_ENTER("grant_free");
   my_hash_free(&column_priv_hash);
+  my_hash_free(&db_user_hash);
   my_hash_free(&proc_priv_hash);
   my_hash_free(&func_priv_hash);
   my_hash_free(&package_spec_priv_hash);
@@ -7724,6 +7746,8 @@ static bool grant_load(THD *thd,
                       0,0,0, (my_hash_get_key) get_grant_table, 0,0);
   (void) my_hash_init(&package_body_priv_hash, &my_charset_utf8_bin,
                       0,0,0, (my_hash_get_key) get_grant_table, 0,0);
+  (void) my_hash_init(&db_user_hash, &my_charset_utf8_bin,
+                      0,0,0, (my_hash_get_key) get_table_search_key, 0,0);
   init_sql_alloc(&grant_memroot, "GRANT", ACL_ALLOC_BLOCK_SIZE, 0, MYF(0));
 
   t_table= tables_priv.table();
@@ -7765,7 +7789,8 @@ static bool grant_load(THD *thd,
 
       if (! mem_check->ok())
 	delete mem_check;
-      else if (my_hash_insert(&column_priv_hash,(uchar*) mem_check))
+      else if (my_hash_insert(&column_priv_hash,(uchar*) mem_check) ||
+        my_hash_insert(&db_user_hash,(uchar*) mem_check))
       {
 	delete mem_check;
 	goto end_unlock;
@@ -7873,7 +7898,7 @@ static my_bool propagate_role_grants_action(void *role_ptr,
 bool grant_reload(THD *thd)
 {
   HASH old_column_priv_hash, old_proc_priv_hash, old_func_priv_hash;
-  HASH old_package_spec_priv_hash, old_package_body_priv_hash;
+  HASH old_package_spec_priv_hash, old_package_body_priv_hash, old_db_user_hash;
   MEM_ROOT old_mem;
   int result;
   DBUG_ENTER("grant_reload");
@@ -7895,6 +7920,7 @@ bool grant_reload(THD *thd)
   old_func_priv_hash= func_priv_hash;
   old_package_spec_priv_hash= package_spec_priv_hash;
   old_package_body_priv_hash= package_body_priv_hash;
+  old_db_user_hash = db_user_hash;
 
   /*
     Create a new memory pool but save the current memory pool to make an undo
@@ -7914,6 +7940,7 @@ bool grant_reload(THD *thd)
     func_priv_hash= old_func_priv_hash;
     package_spec_priv_hash= old_package_spec_priv_hash;
     package_body_priv_hash= old_package_body_priv_hash;
+    db_user_hash= old_db_user_hash;
     grant_memroot= old_mem;                     /* purecov: deadcode */
   }
   else
@@ -7923,6 +7950,7 @@ bool grant_reload(THD *thd)
     my_hash_free(&old_func_priv_hash);
     my_hash_free(&old_package_spec_priv_hash);
     my_hash_free(&old_package_body_priv_hash);
+    my_hash_free(&old_db_user_hash);
     free_root(&old_mem,MYF(0));
   }
 
@@ -8076,10 +8104,20 @@ bool check_grant(THD *thd, ulong want_access, TABLE_LIST *tables,
     if (!want_access)
       continue;                                 // ok
 
-    //Changing value of grant privilege to 0 is flag is true
-    if(thd->security_ctx->deny_user)
-    {
-      t_ref->grant.privilege = 0;
+    grant_table= table_hash_search(sctx->host, sctx->ip,
+                                   t_ref->get_db_name(),
+                                   sctx->priv_user,
+                                   t_ref->get_table_name(),
+                                   FALSE);
+
+    t_ref->grant.privilege|= grant_table ? grant_table->privs : 0;
+    if(grant_table != NULL){
+      t_ref->grant.privilege&= ~(grant_table->deny);
+      //ASK : Vicentiu if it is ok to comment below
+      //if(want_access & grant_table->deny)
+      //{
+      //  goto err;
+      //}
     }
 
     if (!(~t_ref->grant.privilege & want_access) ||
@@ -8123,11 +8161,7 @@ bool check_grant(THD *thd, ulong want_access, TABLE_LIST *tables,
       mysql_rwlock_rdlock(&LOCK_grant);
     }
 
-    grant_table= table_hash_search(sctx->host, sctx->ip,
-                                   t_ref->get_db_name(),
-                                   sctx->priv_user,
-                                   t_ref->get_table_name(),
-                                   FALSE);
+
     if (sctx->priv_role[0])
       grant_table_role= table_hash_search("", NULL, t_ref->get_db_name(),
                                           sctx->priv_role,
@@ -8150,20 +8184,17 @@ bool check_grant(THD *thd, ulong want_access, TABLE_LIST *tables,
     t_ref->grant.grant_table_user= grant_table; // Remember for column test
     t_ref->grant.grant_table_role= grant_table_role;
     t_ref->grant.version= grant_version;
-    t_ref->grant.privilege|= grant_table ? grant_table->privs : 0;
+
+    //Commenting this out:
+    //t_ref->grant.privilege|= grant_table ? grant_table->privs : 0;
+    //t_ref->grant.privilege&= ~(grant_table->deny);
+
     t_ref->grant.privilege|= grant_table_role ? grant_table_role->privs : 0;
     t_ref->grant.want_privilege= ((want_access & COL_ACLS) & ~t_ref->grant.privilege);
 
     if (!(~t_ref->grant.privilege & want_access))
       continue;
 
-    /*
-       Check for table access denied error
-    */
-    if(want_access & grant_table->deny)
-    {
-      goto err;
-    }
 
     if ((want_access&= ~((grant_table ? grant_table->cols : 0) |
                         (grant_table_role ? grant_table_role->cols : 0) |
@@ -8250,11 +8281,20 @@ bool check_grant_column(THD *thd, GRANT_INFO *grant,
   if (!grant_table && !grant_table_role)
     goto err;
 
+
+
   if (grant_table)
   {
     grant_column= column_hash_search(grant_table, name, length);
+
     if (grant_column)
     {
+      /*
+       Column access denied error
+      */
+      if(want_access & grant_column->denied_rights){
+        goto err;
+      }
       want_access&= ~grant_column->rights;
     }
   }
@@ -8266,12 +8306,7 @@ bool check_grant_column(THD *thd, GRANT_INFO *grant,
       want_access&= ~grant_column->rights;
     }
   }
-  /*
-     Column access denied error
-  */
-  if(want_access & grant_column->denied_rights){
-    goto err;
-  }
+
   if (!want_access)
   {
     mysql_rwlock_unlock(&LOCK_grant);
