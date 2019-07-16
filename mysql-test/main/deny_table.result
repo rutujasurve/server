@@ -15,7 +15,12 @@ a
 1
 2
 3
+select * from mysql.tables_priv;
+Host	Db	User	Table_name	Grantor	Timestamp	Table_priv	Column_priv	Table_denied_priv	Column_denied_priv
 DENY SELECT ON foodatabase.t1 TO foo;
+select * from mysql.tables_priv;
+Host	Db	User	Table_name	Grantor	Timestamp	Table_priv	Column_priv	Table_denied_priv	Column_denied_priv
+%	foodatabase	foo	t1	root@localhost	0000-00-00 00:00:00			Select	
 select * from foodatabase.t1;
 ERROR 42000: SELECT command denied to user 'foo'@'localhost' for table 't1'
 INSERT INTO foodatabase.t1 values (4);

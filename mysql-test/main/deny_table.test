@@ -10,7 +10,9 @@ GRANT ALL ON foodatabase.* TO foo;
 select * from foodatabase.t1;
 select * from foodatabase.t2;
 --change_user root
+select * from mysql.tables_priv;
 DENY SELECT ON foodatabase.t1 TO foo;
+select * from mysql.tables_priv;
 --change_user foo
 # The command should now fail with permission denied.
 --error ER_TABLEACCESS_DENIED_ERROR

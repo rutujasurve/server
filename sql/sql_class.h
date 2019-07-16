@@ -404,7 +404,8 @@ class LEX_COLUMN : public Sql_alloc
 public:
   String column;
   uint rights;
-  LEX_COLUMN (const String& x,const  uint& y ): column (x),rights (y) {}
+  uint denied_rights;
+  LEX_COLUMN (const String& x,const  uint& y,const uint& z ): column (x),rights (y), denied_rights(z) {}
 };
 
 class MY_LOCALE;

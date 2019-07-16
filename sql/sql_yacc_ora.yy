@@ -16619,7 +16619,7 @@ column_list_id:
             else
             {
               LEX_COLUMN *col= (new (thd->mem_root)
-                                LEX_COLUMN(*new_str,lex->which_columns));
+                                LEX_COLUMN(*new_str,lex->which_columns,lex->which_columns));
               if (unlikely(col == NULL))
                 MYSQL_YYABORT;
               lex->columns.push_back(col, thd->mem_root);

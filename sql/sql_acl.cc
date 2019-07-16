@@ -5110,14 +5110,16 @@ GRANT_NAME::GRANT_NAME(TABLE *form, bool is_routine)
   privs = (ulong) form->field[6]->val_int();
   privs = fix_rights_for_table(privs);
   init_privs= privs;
-  deny = (ulong) form->field[8]->val_int();
+  //deny = (ulong) form->field[8]->val_int();
+  //Confirm with Vicentiu: Changing offset to 7 instead of 8
+  deny = (ulong) form->field[7]->val_int();
   deny = fix_rights_for_table(deny);
   init_deny= deny;
 
 }
 
 
-//confirm : change g\here: extra arg for deny_col_privs??
+// Extra argument in constrcutor for deny_col_privs
 GRANT_TABLE::GRANT_TABLE(TABLE *form, TABLE *col_privs)
   :GRANT_NAME(form, FALSE)
 {
@@ -5146,7 +5148,7 @@ GRANT_TABLE::GRANT_TABLE(TABLE *form, TABLE *col_privs)
 
   init_hash();
 
-  //confirm: modify if condition as per deny?
+  //Confirm with Vicentiu: modifying if condition as per deny
   if (cols)
   {
     uint key_prefix_len;
@@ -5165,7 +5167,7 @@ GRANT_TABLE::GRANT_TABLE(TABLE *form, TABLE *col_privs)
     key_copy(key, col_privs->record[0], col_privs->key_info, key_prefix_len);
     col_privs->field[4]->store("",0, &my_charset_latin1);
 
-    //confirm: extra arg for denied_col_privs to be used??
+    //Confirm with Vicentiu: extra arg for denied_col_privs
     if (col_privs->file->ha_index_init(0, 1))
     {
       cols= 0;
@@ -5193,7 +5195,9 @@ GRANT_TABLE::GRANT_TABLE(TABLE *form, TABLE *col_privs)
       /* As column name is a string, we don't have to supply a buffer */
       res=col_privs->field[4]->val_str(&column_name);
       ulong priv= (ulong) col_privs->field[6]->val_int();
-      ulong denied_priv= (ulong) col_privs->field[8]->val_int();
+      //ulong denied_priv= (ulong) col_privs->field[8]->val_int();
+      //Confirm with Vicentiu: Using offset 7 instead of 8
+      ulong denied_priv= (ulong) col_privs->field[7]->val_int();
       if (!(mem_check = new GRANT_COLUMN(*res,
                                          fix_rights_for_column(priv), fix_rights_for_column(denied_priv))))
       {
@@ -5373,8 +5377,10 @@ static int replace_column_table(GRANT_TABLE *g_t,
     {
       //privileges= column->denied_rights;
       //Confirm with Vicentiu
-      privileges= column->rights;
+      privileges= column->denied_rights;
     }
+    //Force:
+    //privileges= column->rights;
     bool old_row_exists=0;
     uchar user_key[MAX_KEY_LENGTH];
 
@@ -5727,6 +5733,7 @@ static int replace_table_table(THD *thd, GRANT_TABLE *grant_table,
       ulong denied_privs = (ulong) table->field[8]->val_int();
       ulong denied_cols = (ulong) table->field[9]->val_int();
 
+      //Confirm with Vicentiu: Why this if condition for positive priv
       if(denied_privs | denied_cols)
       {
         grant_table->init_privs= rights;
@@ -5741,6 +5748,7 @@ static int replace_table_table(THD *thd, GRANT_TABLE *grant_table,
       ulong grant_privs = (ulong) table->field[6]->val_int();
       ulong grant_cols = (ulong) table->field[7]->val_int();
 
+      //Confirm with Vicentiu: Why this if condition for negative priv
       if(grant_privs | grant_cols)
       {
         grant_table->init_deny= rights;
@@ -6897,7 +6905,13 @@ int mysql_table_grant(THD *thd, TABLE_LIST *table_list,
         }
         if (unlikely(f == (Field *)-1))
           DBUG_RETURN(TRUE);
-        column_priv|= column->rights;
+        //Confirm with Vicentiu
+        //column_priv|= column->rights;
+        //Confirm with Vicentiu
+        if(!is_denied)
+          column_priv|= column->rights;
+        else
+          column_priv|= column->denied_rights;
       }
       close_mysql_tables(thd);
     }
@@ -7035,7 +7049,17 @@ int mysql_table_grant(THD *thd, TABLE_LIST *table_list,
 					  column->column.ptr(),
 					  column->column.length());
 	if (grant_column)
-	  grant_column->rights&= ~(column->rights | rights);
+  {
+    //Confirm with Vicentiu
+    //grant_column->rights&= ~(column->rights | rights);
+
+   //Confirm with Vicentiu
+	  if(is_denied)
+      grant_column->denied_rights&= ~(column->denied_rights | rights);
+    else
+      grant_column->rights&= ~(column->rights | rights);
+  }
+
       }
       /* scan trough all columns to get new column grant */
       column_priv= 0;
@@ -7043,13 +7067,33 @@ int mysql_table_grant(THD *thd, TABLE_LIST *table_list,
       {
         grant_column= (GRANT_COLUMN*)
           my_hash_element(&grant_table->hash_columns, idx);
-	grant_column->rights&= ~rights;		// Fix other columns
-	column_priv|= grant_column->rights;
+
+       //Confirm with Vicentiu
+       //grant_column->rights&= ~rights;   // Fix other columns
+       //column_priv|= grant_column->rights;
+        //Confirm with Vicentiu
+        if(!is_denied)
+        {
+	        grant_column->rights&= ~rights;		// Fix other columns
+	        column_priv|= grant_column->rights;
+        }
+        else
+        {
+          grant_column->denied_rights&= ~rights;
+          column_priv|= grant_column->denied_rights;
+        }
+
       }
     }
     else
     {
-      column_priv|= grant_table->cols;
+      //Confirm with Vicentiu
+      //column_priv|= grant_table->cols;
+      //Confirm with Vicentiu
+      if(!is_denied)
+        column_priv|= grant_table->cols;
+      else
+        column_priv|= grant_table->deny_cols;
     }
 
 

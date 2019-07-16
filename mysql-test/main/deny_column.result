@@ -17,7 +17,19 @@ a
 1
 2
 3
+select user, host, db, table_name, column_name, column_priv from mysql.columns_priv;
+user	host	db	table_name	column_name	column_priv
+foo	%	foodatabase	t1	a	Select
+foo	%	foodatabase	t1	b	Select
 DENY SELECT(a) ON foodatabase.t1 TO foo;
+select user, host, db, table_name, column_name, column_priv from mysql.columns_priv;
+user	host	db	table_name	column_name	column_priv
+foo	%	foodatabase	t1	a	Select
+foo	%	foodatabase	t1	b	Select
+select * from mysql.columns_priv;
+Host	Db	User	Table_name	Column_name	Timestamp	Column_priv	Column_denied_priv
+%	foodatabase	foo	t1	a	0000-00-00 00:00:00	Select	Select
+%	foodatabase	foo	t1	b	0000-00-00 00:00:00	Select	
 select a from foodatabase.t1;
 ERROR 42000: SELECT command denied to user 'foo'@'localhost' for column 'a' in table 't1'
 select b from foodatabase.t1;
