@@ -8156,7 +8156,12 @@ bool check_grant(THD *thd, ulong want_access, TABLE_LIST *tables,
 
     t_ref->grant.privilege|= grant_table ? grant_table->privs : 0;
     if(grant_table != NULL){
+      //Adding extra for cols
+      grant_table->cols = t_ref->grant.privilege;
       t_ref->grant.privilege&= ~(grant_table->deny);
+      //Save and rememberwhat is in grant.privilege before masking
+      t_ref->grant.privilege&= ~(grant_table->deny_cols);
+
       //ASK : Vicentiu if it is ok to comment below
       //if(want_access & grant_table->deny)
       //{

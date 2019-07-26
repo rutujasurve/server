@@ -16618,8 +16618,13 @@ column_list_id:
               point->rights |= lex->which_columns;
             else
             {
-              LEX_COLUMN *col= (new (thd->mem_root)
-                                LEX_COLUMN(*new_str,lex->which_columns,lex->which_columns));
+              LEX_COLUMN *col;
+              if(lex->sql_command ==  SQLCOM_DENY)
+                col= (new (thd->mem_root)
+                                  LEX_COLUMN(*new_str,0,lex->which_columns));
+              else
+                col= (new (thd->mem_root)
+                                LEX_COLUMN(*new_str,lex->which_columns,0));
               if (unlikely(col == NULL))
                 MYSQL_YYABORT;
               lex->columns.push_back(col, thd->mem_root);
