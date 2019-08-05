@@ -229,7 +229,7 @@ int mysql_table_grant(THD *thd, TABLE_LIST *table, List <LEX_USER> &user_list,
                        bool is_denied, bool revoke);
 bool mysql_routine_grant(THD *thd, TABLE_LIST *table, const Sp_handler *sph,
                          List <LEX_USER> &user_list, ulong rights,
-                         bool revoke, bool write_to_binlog);
+                         bool revoke, bool denied, bool write_to_binlog);
 bool grant_init();
 void grant_free(void);
 bool grant_reload(THD *thd);

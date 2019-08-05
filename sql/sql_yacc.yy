@@ -895,7 +895,7 @@ bool my_yyoverflow(short **a, YYSTYPE **b, size_t *yystacksize);
   Currently there are 127 shift/reduce conflicts.
   We should not introduce new conflicts any more.
 */
-%expect 127
+%expect 128
 
 /*
    Comments for TOKENS.
@@ -16420,6 +16420,20 @@ deny_command:
            lex->sql_command= SQLCOM_DENY;
            lex->type= 0;
          }
+        | grant_privileges ON FUNCTION_SYM grant_ident TO_SYM grant_list
+          opt_require_clause opt_grant_options
+          {
+            if (unlikely(Lex->add_grant_command(thd, SQLCOM_DENY,
+                                                TYPE_ENUM_FUNCTION)))
+              MYSQL_YYABORT;
+          }
+        | grant_privileges ON PROCEDURE_SYM grant_ident TO_SYM grant_list
+          opt_require_clause opt_grant_options
+          {
+            if (unlikely(Lex->add_grant_command(thd, SQLCOM_DENY,
+                                                TYPE_ENUM_PROCEDURE)))
+              MYSQL_YYABORT;
+          }
       ;
 
 grant:

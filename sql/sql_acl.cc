@@ -1053,6 +1053,7 @@ class Procs_priv_table: public Grant_table_base
   Field* routine_type() const { return tl.table->field[4]; }
   Field* grantor() const { return tl.table->field[5]; }
   Field* proc_priv() const { return tl.table->field[6]; }
+  Field* proc_denied_priv() const { return tl.table->field[8]; }
   Field* timestamp() const { return tl.table->field[7]; }
 
  private:
@@ -5112,7 +5113,7 @@ GRANT_NAME::GRANT_NAME(TABLE *form, bool is_routine)
   init_privs= privs;
   //deny = (ulong) form->field[8]->val_int();
   //Confirm with Vicentiu: Changing offset to 7 instead of 8
-  deny = (ulong) form->field[7]->val_int();
+  deny = (ulong) form->field[8]->val_int();
   deny = fix_rights_for_table(deny);
   init_deny= deny;
 
@@ -5780,7 +5781,7 @@ static int replace_routine_table(THD *thd, GRANT_NAME *grant_name,
 			      TABLE *table, const LEX_USER &combo,
 			      const char *db, const char *routine_name,
 			      const Sp_handler *sph,
-			      ulong rights, bool revoke_grant)
+			      ulong rights, bool denied, bool revoke_grant)
 {
   char grantor[USER_HOST_BUFF_SIZE];
   int old_row_exists= 1;
@@ -5841,7 +5842,11 @@ static int replace_routine_table(THD *thd, GRANT_NAME *grant_name,
   {
     ulong j;
     store_record(table,record[1]);
-    j= (ulong) table->field[6]->val_int();
+    if(denied){
+      j= (ulong) table->field[8]->val_int();
+    }else{
+      j= (ulong) table->field[6]->val_int();
+    }
 
     if (revoke_grant)
     {
@@ -5855,7 +5860,11 @@ static int replace_routine_table(THD *thd, GRANT_NAME *grant_name,
   }
 
   table->field[5]->store(grantor,(uint) strlen(grantor), &my_charset_latin1);
-  table->field[6]->store((longlong) store_proc_rights, TRUE);
+  if(denied){
+    table->field[8]->store((longlong) store_proc_rights, TRUE);
+  }else{
+    table->field[6]->store((longlong) store_proc_rights, TRUE);
+  }
   rights=fix_rights_for_procedure(store_proc_rights);
 
   if (old_row_exists)
@@ -5879,8 +5888,13 @@ static int replace_routine_table(THD *thd, GRANT_NAME *grant_name,
 
   if (rights)
   {
-    grant_name->init_privs= rights;
-    grant_name->privs= rights;
+    if(denied){
+      grant_name->init_deny= rights;
+      grant_name->deny= rights;
+    }else{
+      grant_name->init_privs= rights;
+      grant_name->privs= rights;
+   }
   }
   else
   {
@@ -7161,7 +7175,7 @@ int mysql_table_grant(THD *thd, TABLE_LIST *table_list,
 bool mysql_routine_grant(THD *thd, TABLE_LIST *table_list,
                          const Sp_handler *sph,
 			 List <LEX_USER> &user_list, ulong rights,
-			 bool revoke_grant, bool write_to_binlog)
+			 bool revoke_grant, bool denied, bool write_to_binlog)
 {
   List_iterator <LEX_USER> str_list (user_list);
   LEX_USER *Str, *tmp_Str;
@@ -7207,6 +7221,7 @@ bool mysql_routine_grant(THD *thd, TABLE_LIST *table_list,
       continue;
     }
     /* Create user if needed */
+    //ToDo: pass denied to replace_user_table
     if (copy_and_check_auth(Str, tmp_Str, thd) ||
         replace_user_table(thd, tables.user_table(), *Str,
 			   0, revoke_grant, create_new_users,
@@ -7248,7 +7263,7 @@ bool mysql_routine_grant(THD *thd, TABLE_LIST *table_list,
        instead of TABLE directly. */
     if (tables.procs_priv_table().no_such_table() ||
         replace_routine_table(thd, grant_name, tables.procs_priv_table().table(),
-                              *Str, db_name, table_name, sph, rights,
+                              *Str, db_name, table_name, sph, rights, denied,
                               revoke_grant) != 0)
     {
       result= TRUE;
@@ -8704,11 +8719,20 @@ bool check_grant_routine(THD *thd, ulong want_access,
     if ((grant_proc= routine_hash_search(host, sctx->ip, table->db.str, user,
                                          table->table_name.str, sph, 0)))
       table->grant.privilege|= grant_proc->privs;
+      table->grant.privilege&= ~grant_proc->deny;
     if (role[0]) /* current role set check */
     {
       if ((grant_proc= routine_hash_search("", NULL, table->db.str, role,
                                            table->table_name.str, sph, 0)))
       table->grant.privilege|= grant_proc->privs;
+      table->grant.privilege&= ~grant_proc->deny;
+    }
+
+    /*
+      Routine access denied error
+    */
+    if(want_access & grant_proc->deny){
+      goto err;
     }
 
     if (want_access & ~table->grant.privilege)
@@ -11173,7 +11197,7 @@ mysql_revoke_sp_privs(THD *thd,
                                   tables->procs_priv_table().table(),
                                   *lex_user,
                                   grant_proc->db, grant_proc->tname,
-                                  sph, ~(ulong)0, 1) == 0)
+                                  sph, false, ~(ulong)0, 1) == 0)
         {
           revoked= 1;
           continue;
@@ -11534,7 +11558,7 @@ bool sp_revoke_privileges(THD *thd, const char *sp_db, const char *sp_name,
         if (replace_routine_table(thd, grant_proc,
                                   tables.procs_priv_table().table(), lex_user,
                                   grant_proc->db, grant_proc->tname,
-                                  sph, ~(ulong)0, 1) == 0)
+                                  sph, false, ~(ulong)0, 1) == 0)
 	{
 	  revoked= 1;
 	  continue;
@@ -11632,7 +11656,7 @@ bool sp_grant_privileges(THD *thd, const char *sp_db, const char *sp_name,
   */
   thd->push_internal_handler(&error_handler);
   result= mysql_routine_grant(thd, tables, sph, user_list,
-                              DEFAULT_CREATE_PROC_ACLS, FALSE, FALSE);
+                              DEFAULT_CREATE_PROC_ACLS, FALSE, FALSE, FALSE);
   thd->pop_internal_handler();
   DBUG_RETURN(result);
 }

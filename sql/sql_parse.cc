@@ -3267,7 +3267,7 @@ LEX  *lex, int res, SELECT_LEX *select_lex, TABLE_LIST *first_table)
         //WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
         res= mysql_routine_grant(thd, all_tables, sph,
                                  lex->users_list, grants,
-                                 lex->sql_command == SQLCOM_REVOKE, TRUE);
+                                 lex->sql_command == SQLCOM_REVOKE, deny_user, TRUE);
         if (!res)
           my_ok(thd);
       }
