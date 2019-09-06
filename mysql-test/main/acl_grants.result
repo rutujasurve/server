@@ -1,0 +1,209 @@
+CREATE USER foo;
+CREATE DATABASE db_for_test;
+CREATE TABLE db_for_test.t1 (a int);
+INSERT INTO db_for_test.t1 values (1), (2), (3);
+CREATE TABLE db_for_test.t2 (a int, b int);
+INSERT INTO db_for_test.t2 values (1,2), (2,3), (3,4);
+CREATE TABLE db_for_test.t3 (a int);
+INSERT INTO db_for_test.t3 values (1), (2), (3);
+SHOW DATABASES;
+Database
+information_schema
+test
+USE db_for_test;
+ERROR 42000: Access denied for user 'foo'@'%' to database 'db_for_test'
+USE foodb;
+ERROR 42000: Access denied for user 'foo'@'%' to database 'foodb'
+SHOW TABLES FROM db_for_test;
+ERROR 42000: Access denied for user 'foo'@'%' to database 'db_for_test'
+SELECT * FROM db_for_test.t1;
+ERROR 42000: SELECT command denied to user 'foo'@'localhost' for table 't1'
+SELECT a FROM db_for_test.t1;
+ERROR 42000: SELECT command denied to user 'foo'@'localhost' for table 't1'
+SELECT b FROM db_for_test.t1;
+ERROR 42000: SELECT command denied to user 'foo'@'localhost' for table 't1'
+SELECT a,b FROM db_for_test.t1;
+ERROR 42000: SELECT command denied to user 'foo'@'localhost' for table 't1'
+USE db_for_test;
+GRANT SELECT(a) ON db_for_test.t1 TO foo;
+GRANT SELECT(a) ON db_for_test.t2 TO foo;
+SHOW DATABASES;
+Database
+db_for_test
+information_schema
+test
+USE db_for_test;
+SHOW TABLES FROM db_for_test;
+Tables_in_db_for_test
+t1
+t2
+SELECT * FROM INFORMATION_SCHEMA;
+ERROR 42000: SELECT command denied to user 'foo'@'localhost' for table 'INFORMATION_SCHEMA'
+SELECT * FROM db_for_test.t1;
+a
+1
+2
+3
+SELECT a FROM db_for_test.t1;
+a
+1
+2
+3
+SELECT b FROM db_for_test.t1;
+ERROR 42S22: Unknown column 'b' in 'field list'
+SELECT b FROM db_for_test.t2;
+ERROR 42000: SELECT command denied to user 'foo'@'localhost' for column 'b' in table 't2'
+SELECT * FROM INFORMATION_SCHEMA.columns WHERE TABLE_NAME='t2';
+TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	COLUMN_NAME	ORDINAL_POSITION	COLUMN_DEFAULT	IS_NULLABLE	DATA_TYPE	CHARACTER_MAXIMUM_LENGTH	CHARACTER_OCTET_LENGTH	NUMERIC_PRECISION	NUMERIC_SCALE	DATETIME_PRECISION	CHARACTER_SET_NAME	COLLATION_NAME	COLUMN_TYPE	COLUMN_KEY	EXTRA	PRIVILEGES	COLUMN_COMMENT	IS_GENERATED	GENERATION_EXPRESSION
+def	db_for_test	t2	a	1	NULL	YES	int	NULL	NULL	10	0	NULL	NULL	NULL	int(11)			select		NEVER	NULL
+GRANT SELECT ON db_for_test.t1 TO foo;
+SHOW DATABASES;
+Database
+db_for_test
+information_schema
+test
+USE db_for_test;
+SHOW TABLES FROM db_for_test;
+Tables_in_db_for_test
+t1
+t2
+SELECT * FROM INFORMATION_SCHEMA.tables;
+TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	TABLE_TYPE	ENGINE	VERSION	ROW_FORMAT	TABLE_ROWS	AVG_ROW_LENGTH	DATA_LENGTH	MAX_DATA_LENGTH	INDEX_LENGTH	DATA_FREE	AUTO_INCREMENT	CREATE_TIME	UPDATE_TIME	CHECK_TIME	TABLE_COLLATION	CHECKSUM	CREATE_OPTIONS	TABLE_COMMENT	MAX_INDEX_LENGTH	TEMPORARY
+def	information_schema	ALL_PLUGINS	SYSTEM VIEW	Aria	11	Page	NULL	0	8192	4503599627288576	8192	0	NULL	2019-08-28 15:20:13	2019-08-28 15:20:13	NULL	utf8_general_ci	NULL	max_rows=9441		137438945280	Y
+def	information_schema	APPLICABLE_ROLES	SYSTEM VIEW	MEMORY	11	Fixed	NULL	979	0	1042635	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=1071		0	Y
+def	information_schema	CHARACTER_SETS	SYSTEM VIEW	MEMORY	11	Fixed	NULL	384	0	1026816	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=2730		0	Y
+def	information_schema	CHECK_CONSTRAINTS	SYSTEM VIEW	MEMORY	11	Fixed	NULL	2311	0	1046883	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=453		0	Y
+def	information_schema	COLLATIONS	SYSTEM VIEW	MEMORY	11	Fixed	NULL	231	0	1043889	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=4539		0	Y
+def	information_schema	COLLATION_CHARACTER_SET_APPLICABILITY	SYSTEM VIEW	MEMORY	11	Fixed	NULL	195	0	1022190	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=5377		0	Y
+def	information_schema	COLUMNS	SYSTEM VIEW	Aria	11	Page	NULL	0	8192	4503599627288576	8192	0	NULL	2019-08-28 15:20:13	2019-08-28 15:20:13	NULL	utf8_general_ci	NULL	max_rows=2779		137438945280	Y
+def	information_schema	COLUMN_PRIVILEGES	SYSTEM VIEW	MEMORY	11	Fixed	NULL	2893	0	1047266	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=362		0	Y
+def	information_schema	ENABLED_ROLES	SYSTEM VIEW	MEMORY	11	Fixed	NULL	387	0	1034838	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=2709		0	Y
+def	information_schema	ENGINES	SYSTEM VIEW	MEMORY	11	Fixed	NULL	731	0	1040944	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=1434		0	Y
+def	information_schema	EVENTS	SYSTEM VIEW	Aria	11	Page	NULL	0	8192	4503599627288576	8192	0	NULL	2019-08-28 15:20:13	2019-08-28 15:20:13	NULL	utf8_general_ci	NULL	max_rows=611		137438945280	Y
+def	information_schema	FILES	SYSTEM VIEW	MEMORY	11	Fixed	NULL	4022	0	1045720	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=260		0	Y
+def	information_schema	GLOBAL_STATUS	SYSTEM VIEW	MEMORY	11	Fixed	NULL	6340	0	1046100	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=165		0	Y
+def	information_schema	GLOBAL_VARIABLES	SYSTEM VIEW	MEMORY	11	Fixed	NULL	6340	0	1046100	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=165		0	Y
+def	information_schema	KEY_CACHES	SYSTEM VIEW	MEMORY	11	Fixed	NULL	659	0	1040561	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=1591		0	Y
+def	information_schema	KEY_COLUMN_USAGE	SYSTEM VIEW	MEMORY	11	Fixed	NULL	4637	0	1043325	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=226		0	Y
+def	information_schema	OPTIMIZER_TRACE	SYSTEM VIEW	Aria	11	Page	NULL	0	8192	4503599627288576	8192	0	NULL	2019-08-28 15:20:13	2019-08-28 15:20:13	NULL	utf8_general_ci	NULL	max_rows=578524		137438945280	Y
+def	information_schema	PARAMETERS	SYSTEM VIEW	Aria	11	Page	NULL	0	8192	4503599627288576	8192	0	NULL	2019-08-28 15:20:13	2019-08-28 15:20:13	NULL	utf8_general_ci	NULL	max_rows=6030		137438945280	Y
+def	information_schema	PARTITIONS	SYSTEM VIEW	Aria	11	Page	NULL	0	8192	4503599627288576	8192	0	NULL	2019-08-28 15:20:13	2019-08-28 15:20:13	NULL	utf8_general_ci	NULL	max_rows=5579		137438945280	Y
+def	information_schema	PLUGINS	SYSTEM VIEW	Aria	11	Page	NULL	0	8192	4503599627288576	8192	0	NULL	2019-08-28 15:20:13	2019-08-28 15:20:13	NULL	utf8_general_ci	NULL	max_rows=9441		137438945280	Y
+def	information_schema	PROCESSLIST	SYSTEM VIEW	Aria	11	Page	NULL	0	8192	4503599627288576	8192	0	NULL	2019-08-28 15:20:13	2019-08-28 15:20:13	NULL	utf8_general_ci	NULL	max_rows=15224		137438945280	Y
+def	information_schema	PROFILING	SYSTEM VIEW	MEMORY	11	Fixed	NULL	308	0	1034880	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=3404		0	Y
+def	information_schema	REFERENTIAL_CONSTRAINTS	SYSTEM VIEW	MEMORY	11	Fixed	NULL	4814	0	1044638	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=217		0	Y
+def	information_schema	ROUTINES	SYSTEM VIEW	Aria	11	Page	NULL	0	8192	4503599627288576	8192	0	NULL	2019-08-28 15:20:13	2019-08-28 15:20:13	NULL	utf8_general_ci	NULL	max_rows=576		137438945280	Y
+def	information_schema	SCHEMATA	SYSTEM VIEW	MEMORY	11	Fixed	NULL	6538	0	1046080	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=160		0	Y
+def	information_schema	SCHEMA_PRIVILEGES	SYSTEM VIEW	MEMORY	11	Fixed	NULL	2507	0	1045419	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=418		0	Y
+def	information_schema	SESSION_STATUS	SYSTEM VIEW	MEMORY	11	Fixed	NULL	6340	0	1046100	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=165		0	Y
+def	information_schema	SESSION_VARIABLES	SYSTEM VIEW	MEMORY	11	Fixed	NULL	6340	0	1046100	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=165		0	Y
+def	information_schema	STATISTICS	SYSTEM VIEW	MEMORY	11	Fixed	NULL	5753	0	1047046	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=182		0	Y
+def	information_schema	SYSTEM_VARIABLES	SYSTEM VIEW	Aria	11	Page	NULL	0	8192	4503599627288576	8192	0	NULL	2019-08-28 15:20:13	2019-08-28 15:20:13	NULL	utf8_general_ci	NULL	max_rows=651		137438945280	Y
+def	information_schema	TABLES	SYSTEM VIEW	MEMORY	11	Fixed	NULL	14841	0	1038870	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=70		0	Y
+def	information_schema	TABLESPACES	SYSTEM VIEW	MEMORY	11	Fixed	NULL	6951	0	1042650	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=150		0	Y
+def	information_schema	TABLE_CONSTRAINTS	SYSTEM VIEW	MEMORY	11	Fixed	NULL	2504	0	1044168	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=418		0	Y
+def	information_schema	TABLE_PRIVILEGES	SYSTEM VIEW	MEMORY	11	Fixed	NULL	2700	0	1044900	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=388		0	Y
+def	information_schema	TRIGGERS	SYSTEM VIEW	Aria	11	Page	NULL	0	8192	4503599627288576	8192	0	NULL	2019-08-28 15:20:13	2019-08-28 15:20:13	NULL	utf8_general_ci	NULL	max_rows=563		137438945280	Y
+def	information_schema	USER_PRIVILEGES	SYSTEM VIEW	MEMORY	11	Fixed	NULL	2314	0	1043614	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=453		0	Y
+def	information_schema	VIEWS	SYSTEM VIEW	Aria	11	Page	NULL	0	8192	4503599627288576	8192	0	NULL	2019-08-28 15:20:13	2019-08-28 15:20:13	NULL	utf8_general_ci	NULL	max_rows=6019		137438945280	Y
+def	information_schema	CLIENT_STATISTICS	SYSTEM VIEW	MEMORY	11	Fixed	NULL	386	0	1032164	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=2716		0	Y
+def	information_schema	INDEX_STATISTICS	SYSTEM VIEW	MEMORY	11	Fixed	NULL	1743	0	1047543	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=601		0	Y
+def	information_schema	GEOMETRY_COLUMNS	SYSTEM VIEW	MEMORY	11	Fixed	NULL	4244	0	1044024	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=247		0	Y
+def	information_schema	SPATIAL_REF_SYS	SYSTEM VIEW	MEMORY	11	Fixed	NULL	7691	0	1045976	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=136		0	Y
+def	information_schema	TABLE_STATISTICS	SYSTEM VIEW	MEMORY	11	Fixed	NULL	1181	0	1045185	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=887		0	Y
+def	information_schema	USER_STATISTICS	SYSTEM VIEW	MEMORY	11	Fixed	NULL	567	0	1046682	0	0	NULL	2019-08-28 15:20:13	NULL	NULL	utf8_general_ci	NULL	max_rows=1849		0	Y
+def	db_for_test	t2	BASE TABLE	MyISAM	10	Fixed	3	9	27	2533274790395903	1024	0	NULL	2019-08-28 15:20:13	2019-08-28 15:20:13	NULL	latin1_swedish_ci	NULL			17179868160	N
+def	db_for_test	t1	BASE TABLE	MyISAM	10	Fixed	3	7	21	1970324836974591	1024	0	NULL	2019-08-28 15:20:13	2019-08-28 15:20:13	NULL	latin1_swedish_ci	NULL			17179868160	N
+SELECT * FROM db_for_test.t1;
+a
+1
+2
+3
+SELECT a FROM db_for_test.t1;
+a
+1
+2
+3
+GRANT SELECT ON db_for_test.* TO foo;
+SHOW DATABASES;
+Database
+db_for_test
+information_schema
+test
+USE db_for_test;
+SHOW TABLES FROM db_for_test;
+Tables_in_db_for_test
+t1
+t2
+t3
+SELECT * FROM INFORMATION_SCHEMA;
+ERROR 42S02: Table 'db_for_test.INFORMATION_SCHEMA' doesn't exist
+SELECT * FROM db_for_test.t1;
+a
+1
+2
+3
+GRANT SELECT ON *.* TO foo;
+SHOW DATABASES;
+Database
+db_for_test
+information_schema
+mtr
+mysql
+performance_schema
+test
+USE db_for_test;
+SHOW TABLES FROM db_for_test;
+Tables_in_db_for_test
+t1
+t2
+t3
+SELECT * FROM INFORMATION_SCHEMA;
+ERROR 42S02: Table 'db_for_test.INFORMATION_SCHEMA' doesn't exist
+SELECT * FROM db_for_test.t1;
+a
+1
+2
+3
+SELECT a FROM db_for_test.t1;
+a
+1
+2
+3
+SELECT b FROM db_for_test.t1;
+ERROR 42S22: Unknown column 'b' in 'field list'
+SELECT a,b FROM db_for_test.t1;
+ERROR 42S22: Unknown column 'b' in 'field list'
+USE db_for_test;
+CREATE PROCEDURE p1() SELECT a FROM t1;
+CREATE PROCEDURE p2() SELECT a FROM t2;
+CALL db_for_test.p1();
+ERROR 42000: execute command denied to user 'foo'@'%' for routine 'db_for_test.p1'
+CALL db_for_test.p2;
+ERROR 42000: execute command denied to user 'foo'@'%' for routine 'db_for_test.p2'
+GRANT EXECUTE ON PROCEDURE db_for_test.p1 TO foo;
+GRANT EXECUTE ON PROCEDURE db_for_test.p2 TO foo;
+CALL db_for_test.p1();
+a
+1
+2
+3
+CALL db_for_test.p2;
+a
+1
+2
+3
+show grants for foo;
+Grants for foo@%
+GRANT SELECT ON *.* TO 'foo'@'%'
+GRANT SELECT ON `db_for_test`.* TO 'foo'@'%'
+GRANT SELECT, SELECT (a) ON `db_for_test`.`t1` TO 'foo'@'%'
+GRANT SELECT (a) ON `db_for_test`.`t2` TO 'foo'@'%'
+GRANT EXECUTE ON PROCEDURE `db_for_test`.`p1` TO 'foo'@'%'
+GRANT EXECUTE ON PROCEDURE `db_for_test`.`p2` TO 'foo'@'%'
+select * from mysql.procs_priv where user='foo';
+Host	Db	User	Routine_name	Routine_type	Grantor	Proc_priv	Timestamp
+%	db_for_test	foo	p1	PROCEDURE	root@localhost	Execute	0000-00-00 00:00:00
+%	db_for_test	foo	p2	PROCEDURE	root@localhost	Execute	0000-00-00 00:00:00
+CREATE USER 'replication_user'@'%' IDENTIFIED BY 'bigs3cret';
+GRANT REPLICATION SLAVE ON *.* TO 'replication_user'@'%';

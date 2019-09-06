@@ -1,0 +1,104 @@
+CREATE USER foo;
+CREATE DATABASE db_for_test;
+CREATE TABLE db_for_test.t1 (a int);
+INSERT INTO db_for_test.t1 values (1), (2), (3);
+CREATE TABLE db_for_test.t2 (a int, b int);
+INSERT INTO db_for_test.t2 values (1,2), (2,3), (3,4);
+CREATE TABLE db_for_test.t3 (a int);
+INSERT INTO db_for_test.t3 values (1), (2), (3);
+--change_user foo
+# Without grants
+SHOW DATABASES;
+--error ER_DBACCESS_DENIED_ERROR
+USE db_for_test;
+--error ER_DBACCESS_DENIED_ERROR
+USE foodb;
+--error ER_DBACCESS_DENIED_ERROR
+SHOW TABLES FROM db_for_test;
+#SELECT  * FROM INFORMATION_SCHEMA.tables;
+#SELECT * FROM INFORMATION_SCHEMA.columns;
+--error ER_TABLEACCESS_DENIED_ERROR
+SELECT * FROM db_for_test.t1;
+--error ER_TABLEACCESS_DENIED_ERROR
+SELECT a FROM db_for_test.t1;
+--error ER_TABLEACCESS_DENIED_ERROR
+SELECT b FROM db_for_test.t1;
+--error ER_TABLEACCESS_DENIED_ERROR
+SELECT a,b FROM db_for_test.t1;
+
+--change_user root
+USE db_for_test;
+GRANT SELECT(a) ON db_for_test.t1 TO foo;
+GRANT SELECT(a) ON db_for_test.t2 TO foo;
+--change_user foo
+SHOW DATABASES;
+USE db_for_test;
+SHOW TABLES FROM db_for_test;
+--error ER_TABLEACCESS_DENIED_ERROR
+SELECT * FROM INFORMATION_SCHEMA;
+SELECT * FROM db_for_test.t1;
+SELECT a FROM db_for_test.t1;
+--error ER_BAD_FIELD_ERROR
+SELECT b FROM db_for_test.t1;
+--error ER_COLUMNACCESS_DENIED_ERROR
+SELECT b FROM db_for_test.t2;
+SELECT * FROM INFORMATION_SCHEMA.columns WHERE TABLE_NAME='t2';
+
+--change_user root
+GRANT SELECT ON db_for_test.t1 TO foo;
+--change_user foo
+SHOW DATABASES;
+USE db_for_test;
+SHOW TABLES FROM db_for_test;
+SELECT * FROM INFORMATION_SCHEMA.tables;
+SELECT * FROM db_for_test.t1;
+SELECT a FROM db_for_test.t1;
+
+--change_user root
+GRANT SELECT ON db_for_test.* TO foo;
+--change_user foo
+SHOW DATABASES;
+USE db_for_test;
+SHOW TABLES FROM db_for_test;
+--error ER_NO_SUCH_TABLE
+SELECT * FROM INFORMATION_SCHEMA;
+SELECT * FROM db_for_test.t1;
+
+--change_user root
+GRANT SELECT ON *.* TO foo;
+--change_user foo
+SHOW DATABASES;
+USE db_for_test;
+SHOW TABLES FROM db_for_test;
+--error ER_NO_SUCH_TABLE
+SELECT * FROM INFORMATION_SCHEMA;
+SELECT * FROM db_for_test.t1;
+SELECT a FROM db_for_test.t1;
+--error ER_BAD_FIELD_ERROR
+SELECT b FROM db_for_test.t1;
+--error ER_BAD_FIELD_ERROR
+SELECT a,b FROM db_for_test.t1;
+
+# FOR PROCEDURE
+--change_user root
+USE db_for_test;
+CREATE PROCEDURE p1() SELECT a FROM t1;
+CREATE PROCEDURE p2() SELECT a FROM t2;
+--change_user foo
+--error ER_PROCACCESS_DENIED_ERROR
+CALL db_for_test.p1();
+--error ER_PROCACCESS_DENIED_ERROR
+CALL db_for_test.p2;
+--change_user root
+GRANT EXECUTE ON PROCEDURE db_for_test.p1 TO foo;
+GRANT EXECUTE ON PROCEDURE db_for_test.p2 TO foo;
+--change_user foo
+CALL db_for_test.p1();
+CALL db_for_test.p2;
+--change_user root
+show grants for foo;
+select * from mysql.procs_priv where user='foo';
+
+--change_user root
+CREATE USER 'replication_user'@'%' IDENTIFIED BY 'bigs3cret';
+GRANT REPLICATION SLAVE ON *.* TO 'replication_user'@'%';
